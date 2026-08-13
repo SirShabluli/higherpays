@@ -1,9 +1,12 @@
 # Dependencies
-node_modules
+node_modules/
+**/node_modules/
 
 # Build output
-dist
-dist-ssr
+dist/
+dist-ssr/
+**/dist/
+**/dist-ssr/
 
 # Logs
 *.log
@@ -16,9 +19,14 @@ Thumbs.db
 # Editor
 .vscode/*
 !.vscode/extensions.json
-.idea
+.idea/
 *.sw?
 
 # Local env
 *.local
 .env
+.env.*
+!.env.example
+
+# Coverage
+coverage/

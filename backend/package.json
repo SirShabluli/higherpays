@@ -1,0 +1,24 @@
+{
+  "name": "higherpays-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "description": "HigherPays \u2014 creator agency operating system (backend API)",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "migrate": "node src/util/migrate.js",
+    "seed": "node src/util/seed.js",
+    "setup": "node src/util/migrate.js && node src/util/seed.js",
+    "test": "node --test test/*.test.js",
+    "test:unit": "node --test test/mantapay.test.js",
+    "test:db": "node --test test/engine.test.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.11.5",
+    "xlsx": "^0.18.5"
+  }
+}
