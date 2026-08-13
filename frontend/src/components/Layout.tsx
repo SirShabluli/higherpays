@@ -1,7 +1,12 @@
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAppStore } from '../store/appStore';
+import { useAuthStore } from '../store/auth';
+import { useSessionStore } from '../store/session';
+import { useDemoModeStore } from '../store/demoMode';
 import { useCan } from '../hooks/usePermission';
 import { ROLE_HINT } from '../rbac/permissions';
+import { authApi } from '../api/endpoints';
 import type { Role, Permission } from '../types';
 
 interface NavItem {
@@ -73,6 +78,32 @@ export default function Layout() {
   const role = useAppStore(s => s.role);
   const setRole = useAppStore(s => s.setRole);
   const brand = useAppStore(s => s.brand);
+  const user = useAuthStore(s => s.user);
+  const workspaces = useAuthStore(s => s.workspaces);
+  const activeWorkspaceId = useSessionStore(s => s.activeWorkspaceId);
+  const setActiveWorkspaceId = useSessionStore(s => s.setActiveWorkspaceId);
+  const isDemo = useDemoModeStore(s => s.enabled);
+  const disableDemo = useDemoModeStore(s => s.disable);
+  const clearAuth = useAuthStore(s => s.clear);
+  const clearSession = useSessionStore(s => s.clear);
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+
+  const logout = useMutation({
+    mutationFn: async () => {
+      const rt = useAuthStore.getState().refreshToken;
+      if (rt) await authApi.logout(rt);
+    },
+    onSettled: () => {
+      clearAuth();
+      clearSession();
+      disableDemo();
+      queryClient.clear();
+      navigate('/login', { replace: true });
+    },
+  });
+
+  const activeWorkspace = workspaces.find(w => w.id === activeWorkspaceId) ?? workspaces[0];
 
   return (
     <div className="app">
@@ -83,6 +114,21 @@ export default function Layout() {
           <div><h1>HigherPays</h1></div>
         </div>
 
+        {workspaces.length > 1 && (
+          <div className="ws-picker">
+            <label htmlFor="ws-picker">Workspace</label>
+            <select
+              id="ws-picker"
+              value={activeWorkspace?.id ?? ''}
+              onChange={e => setActiveWorkspaceId(e.target.value)}
+            >
+              {workspaces.map(w => (
+                <option key={w.id} value={w.id}>{w.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
         <nav>
           <NavSection label="Operate" items={OPERATE} />
           <NavSection label="Manage" items={MANAGE} />
@@ -90,20 +136,47 @@ export default function Layout() {
         </nav>
 
         <div className="side-foot">
-          <div className="roleswitch">
-            <label>Preview as role</label>
-            <select
-              value={role}
-              onChange={e => setRole(e.target.value as Role)}
-            >
-              {ALL_ROLES.map(r => (
-                <option key={r} value={r}>
-                  {r === 'super_admin' ? 'Super Admin' : r.charAt(0).toUpperCase() + r.slice(1)}
-                </option>
-              ))}
-            </select>
-            <div className="hint">{ROLE_HINT[role]}</div>
-          </div>
+          {isDemo && (
+            <div className="demo-badge" title="You're in offline demo mode.">
+              DEMO MODE
+            </div>
+          )}
+
+          {isDemo && (
+            <div className="roleswitch">
+              <label htmlFor="role-preview">Preview as role</label>
+              <select
+                id="role-preview"
+                value={role}
+                onChange={e => setRole(e.target.value as Role)}
+              >
+                {ALL_ROLES.map(r => (
+                  <option key={r} value={r}>
+                    {r === 'super_admin' ? 'Super Admin' : r.charAt(0).toUpperCase() + r.slice(1)}
+                  </option>
+                ))}
+              </select>
+              <div className="hint">{ROLE_HINT[role]}</div>
+            </div>
+          )}
+
+          {user && (
+            <div className="user-block">
+              <div className="user-info">
+                <div className="user-name">{user.fullName}</div>
+                <div className="user-email">{user.email}</div>
+              </div>
+            </div>
+          )}
+
+          <button
+            className="btn ghost"
+            style={{ width: '100%', marginTop: 10 }}
+            onClick={() => logout.mutate()}
+            disabled={logout.isPending}
+          >
+            {isDemo ? 'Exit demo' : 'Sign out'}
+          </button>
         </div>
       </aside>
 

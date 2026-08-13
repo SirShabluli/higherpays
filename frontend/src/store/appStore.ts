@@ -1,3 +1,17 @@
+/**
+ * Legacy monolithic store — kept alive while the pages are still ported over.
+ *
+ * New code should use:
+ *   - `store/auth.ts`         — access/refresh tokens, current user, workspaces
+ *   - `store/session.ts`      — active workspace id
+ *   - `store/preferences.ts`  — timezone, density, ...
+ *   - React Query             — server entities (creators, links, ...)
+ *
+ * This file owns the *demo-only* in-memory dataset that the un-migrated pages
+ * still read from. When the last page has been rewritten to hit the API,
+ * delete this file wholesale.
+ */
+
 import { create } from 'zustand';
 import type {
   Role, Permission, Brand, Workspace, Creator, Chatter, Member, Customer,
@@ -10,9 +24,8 @@ interface AppStore {
   // Mode
   mode: 'demo' | 'live';
 
-  // Auth
-  token: string | null;
-  refreshToken: string | null;
+  // 2FA flag — surfaced here for the pre-migration Settings page. Real auth
+  // truth lives in the auth store (`user.twoFactorEnabled`).
   twoFactorEnabled: boolean;
 
   // Core state
@@ -47,8 +60,6 @@ interface AppStore {
   setRole: (role: Role) => void;
   setActiveWorkspace: (wsId: string) => void;
   setMode: (mode: 'demo' | 'live') => void;
-  setAuth: (token: string, refreshToken: string) => void;
-  clearAuth: () => void;
   setTz: (mode: 'auto' | 'manual', manual?: string) => void;
   loadDemoState: () => void;
   updateState: (partial: Partial<AppStore>) => void;
@@ -58,8 +69,6 @@ const demoState = createDemoState();
 
 export const useAppStore = create<AppStore>((set) => ({
   mode: 'demo',
-  token: null,
-  refreshToken: null,
   twoFactorEnabled: false,
 
   brand: demoState.brand,
@@ -83,8 +92,6 @@ export const useAppStore = create<AppStore>((set) => ({
   setRole: (role) => set({ role }),
   setActiveWorkspace: (wsId) => set({ activeWsId: wsId }),
   setMode: (mode) => set({ mode }),
-  setAuth: (token, refreshToken) => set({ token, refreshToken, mode: 'live' }),
-  clearAuth: () => set({ token: null, refreshToken: null, mode: 'demo' }),
   setTz: (mode, manual) => set({ tzMode: mode, tzManual: manual ?? null }),
   loadDemoState: () => {
     const s = createDemoState();

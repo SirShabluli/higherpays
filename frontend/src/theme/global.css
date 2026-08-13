@@ -45,7 +45,19 @@ nav { display: flex; flex-direction: column; gap: 3px }
 .navitem:hover { color: var(--text); background: rgba(21,195,175,.06) }
 .navitem.active { background: rgba(21,195,175,.12); color: var(--text); border-color: rgba(21,195,175,.25) }
 .navitem.hidden { display: none }
-.side-foot { margin-top: auto; border-top: 1px solid var(--line); padding-top: 14px }
+.side-foot { margin-top: auto; border-top: 1px solid var(--line); padding-top: 14px; display: flex; flex-direction: column; gap: 12px }
+.ws-picker label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 700; margin-bottom: 6px; padding-left: 2px }
+.ws-picker select { width: 100%; background: var(--ink); border: 1px solid var(--line); color: var(--text); font-family: var(--sans); font-size: 14.3px; padding: 8px 10px; border-radius: 9px; outline: none }
+.demo-badge {
+  display: inline-block; align-self: flex-start;
+  font-size: 10.5px; font-weight: 800; letter-spacing: .14em;
+  color: var(--amber); background: rgba(245,196,81,.10);
+  border: 1px solid rgba(245,196,81,.35); border-radius: 999px;
+  padding: 3px 9px;
+}
+.user-block { padding-top: 4px; border-top: 1px solid var(--line); margin-top: 4px }
+.user-name { font-size: 13.2px; font-weight: 600; color: var(--text); line-height: 1.3 }
+.user-email { font-size: 11.6px; color: var(--muted); line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .roleswitch label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 700; display: block; margin-bottom: 6px; padding-left: 2px }
 .roleswitch select { width: 100%; background-color: var(--ink); border: 1px solid var(--line); color: var(--text); font-family: var(--sans); font-size: 14.3px; padding: 8px 10px; border-radius: 9px; outline: none }
 .roleswitch .hint { font-size: 11.6px; color: #4d5a72; margin-top: 7px; line-height: 1.4 }
@@ -76,7 +88,7 @@ main { padding: 26px 30px; overflow-y: auto }
 .filters { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; margin-bottom: 16px }
 .field { display: flex; flex-direction: column; gap: 5px }
 .field label { font-size: 11.6px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; font-weight: 600; padding-left: 2px }
-select, input[type=text], input[type=number], input[type=date] { background: var(--ink); border: 1px solid var(--line); color: var(--text); font-family: var(--sans); font-size: 14.3px; padding: 8px 11px; border-radius: 9px; outline: none; min-width: 150px; color-scheme: dark; transition: border-color .15s ease, background-image .15s ease }
+select, input[type=text], input[type=number], input[type=date], input[type=email], input[type=password], input[type=search], input[type=tel] { background: var(--ink); border: 1px solid var(--line); color: var(--text); font-family: var(--sans); font-size: 14.3px; padding: 8px 11px; border-radius: 9px; outline: none; min-width: 150px; color-scheme: dark; transition: border-color .15s ease, background-image .15s ease }
 input[type=date] { min-width: 150px }
 .rangebtn { display: flex; align-items: center; gap: 8px; background: var(--ink); border: 1px solid var(--line); color: var(--text); font-family: var(--sans); font-size: 14.3px; padding: 8px 11px; border-radius: 9px; cursor: pointer; min-width: 200px; text-align: left; transition: border-color .15s ease, color .15s ease }
 .rangebtn .chev { color: var(--muted); transition: color .15s ease }
@@ -367,4 +379,60 @@ textarea:hover:not(:disabled) { border-color: var(--brand) }
   .filters .field { flex: 1 1 100% }
   .pagehead .btn { width: 100% }
   main { padding: 14px 12px }
+}
+
+/* ── Auth (login) screen ────────────────────────────────────────────────── */
+.auth-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    radial-gradient(1200px 700px at 85% -10%, rgba(21,195,175,.14) 0%, transparent 55%),
+    radial-gradient(900px 500px at 12% 110%, rgba(74,222,158,.10) 0%, transparent 55%),
+    var(--ink);
+}
+.auth-card {
+  width: 100%;
+  max-width: 400px;
+  background: linear-gradient(180deg, var(--panel), var(--panel-2));
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 28px;
+  box-shadow: 0 24px 60px -20px rgba(0,0,0,.55);
+}
+.auth-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 22px }
+.auth-brand h1 { font-size: 18.7px; font-weight: 750; letter-spacing: -.01em }
+.auth-brand .sub { font-size: 13.2px; color: var(--muted); margin-top: 2px }
+.auth-card form { display: flex; flex-direction: column; gap: 12px }
+.auth-card .field input { width: 100%; min-width: 0 }
+.auth-divider {
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+  gap: 12px; margin: 20px 0; color: #4d5a72; font-size: 12.1px;
+  text-transform: uppercase; letter-spacing: .12em; font-weight: 700;
+}
+.auth-divider::before, .auth-divider::after {
+  content: ''; height: 1px; background: var(--line);
+}
+.auth-hint {
+  font-size: 12.1px; color: var(--muted); text-align: center; margin-top: 18px; line-height: 1.55;
+}
+.auth-hint code {
+  font-family: var(--mono); font-size: 11.6px; background: var(--panel-2);
+  border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; color: var(--text);
+}
+
+/* ── Error boundary fallback ────────────────────────────────────────────── */
+.error-boundary {
+  min-height: 100vh; display: grid; place-items: center; padding: 24px;
+}
+.error-boundary-inner {
+  max-width: 520px; width: 100%; text-align: left;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 14px; padding: 24px;
+}
+.error-boundary-inner h1 { font-size: 20.9px; font-weight: 750; margin-bottom: 8px }
+.error-boundary-inner pre {
+  background: var(--ink); border: 1px solid var(--line); border-radius: 9px;
+  padding: 12px; font-family: var(--mono); font-size: 12.1px; color: var(--red);
+  white-space: pre-wrap; word-break: break-word; margin: 14px 0;
 }
