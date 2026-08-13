@@ -1,0 +1,7 @@
+services:
+  frontend:
+    build: .
+    container_name: higherpays
+    ports:
+      - "8083:80"
+    restart: unless-stopped
