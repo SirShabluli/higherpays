@@ -1,0 +1,42 @@
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import Layout from './components/Layout';
+import ToastContainer from './components/Toast';
+import PaymentsPage from './pages/Payments';
+import LinksPage from './pages/Links';
+import AnalyticsPage from './pages/Analytics';
+import GoalsPage from './pages/Goals';
+import ComparePage from './pages/Compare';
+import PayoutsPage from './pages/Payouts';
+import CustomersPage from './pages/Customers';
+import PlatformPage from './pages/Platform';
+import WorkspacesPage from './pages/Workspaces';
+import TeamPage from './pages/Team';
+import CreatorsPage from './pages/Creators';
+import SettingsPage from './pages/Settings';
+
+export default function App() {
+  return (
+    <>
+    <BrowserRouter>
+      <Routes>
+        <Route element={<Layout />}>
+          <Route path="/payments" element={<PaymentsPage />} />
+          <Route path="/links" element={<LinksPage />} />
+          <Route path="/analytics" element={<AnalyticsPage />} />
+          <Route path="/goals" element={<GoalsPage />} />
+          <Route path="/compare" element={<ComparePage />} />
+          <Route path="/payouts" element={<PayoutsPage />} />
+          <Route path="/customers" element={<CustomersPage />} />
+          <Route path="/platform" element={<PlatformPage />} />
+          <Route path="/workspaces" element={<WorkspacesPage />} />
+          <Route path="/team" element={<TeamPage />} />
+          <Route path="/creators" element={<CreatorsPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="*" element={<Navigate to="/payments" replace />} />
+        </Route>
+      </Routes>
+    </BrowserRouter>
+    <ToastContainer />
+    </>
+  );
+}
