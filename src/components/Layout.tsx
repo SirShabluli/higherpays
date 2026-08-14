@@ -2,6 +2,7 @@ import { NavLink, Outlet } from 'react-router-dom';
 import { useAppStore } from '../store/appStore';
 import { useCan } from '../hooks/usePermission';
 import { ROLE_HINT } from '../rbac/permissions';
+import NotificationBell from './NotificationBell';
 import type { Role, Permission } from '../types';
 
 interface NavItem {
@@ -81,6 +82,8 @@ export default function Layout() {
           <div className="mark">{brand.initial}</div>
           <span className="brand-sep" aria-hidden="true" />
           <div><h1>HigherPays</h1></div>
+          <span style={{ flex: 1 }} />
+          <NotificationBell />
         </div>
 
         <nav>
