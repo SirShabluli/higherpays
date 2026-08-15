@@ -1,4 +1,14 @@
-import type { Creator, Chatter, Commission, SplitResult, RevenueModel } from '../types';
+/**
+ * Backward-compatible facade over `resolveRevshareRules` + `splitAmount`.
+ *
+ * New code should call those two directly. This wrapper exists only so that
+ * the pre-migration pages (Payments, Payouts, Analytics, Compare, Goals)
+ * keep compiling with their existing imports and property names.
+ */
+
+import type { Creator, Chatter, Commission, SplitResult } from '../types';
+import { resolveRevshareRules } from './revshareRules';
+import { splitAmount } from './splitAmount';
 
 interface SplitInput {
   amount: number;
@@ -8,40 +18,29 @@ interface SplitInput {
   margin?: number | null;
 }
 
+const DEFAULT_PSP_PCT = 8;
+const DEFAULT_MARGIN_PCT = 0;
+
 export function splitSale(
-  s: SplitInput,
-  creators: Creator[],
-  chatters: Chatter[],
+  input: SplitInput,
+  creators: readonly Creator[],
+  chatters: readonly Chatter[],
   commission: Commission,
 ): SplitResult {
-  const g = s.amount;
-  const psp = s.psp != null ? +s.psp : 8;
-  const marg = s.margin != null ? +s.margin : 0;
-  const blended = psp + marg;
-  const platformFee = g * blended / 100;
-  const dist = g - platformFee;
-
-  const cObj = creators.find(c => c.name === s.creator);
-  const model: RevenueModel = cObj ? cObj.revModel : 'revshare';
-  const cSplit = cObj ? (+cObj.splitCreator || 70) : commission.creatorSplit;
-
-  const chObj = s.chatter ? chatters.find(c => c.name === s.chatter) : null;
-  const chatterPct = (chObj && chObj.commissionPct != null) ? +chObj.commissionPct : (commission.chatterPct || 0);
-
-  const creatorCut = model === 'revshare' ? dist * cSplit / 100 : 0;
-  const chatterCut = dist * chatterPct / 100;
-  const agencyCut = dist - creatorCut - chatterCut;
-
+  const rules = resolveRevshareRules(input.creator, input.chatter, creators, chatters, commission);
+  const psp = input.psp != null ? +input.psp : DEFAULT_PSP_PCT;
+  const margin = input.margin != null ? +input.margin : DEFAULT_MARGIN_PCT;
+  const s = splitAmount(input.amount, psp, margin, rules);
   return {
-    g,
-    platformFee,
-    dist,
-    creatorCut,
-    chatterCut,
-    agencyCut,
-    pspFee: g * psp / 100,
-    margin: g * marg / 100,
-    model,
-    blended,
+    g: s.gross,
+    platformFee: s.platformFee,
+    dist: s.distributable,
+    creatorCut: s.creatorCut,
+    chatterCut: s.chatterCut,
+    agencyCut: s.agencyCut,
+    pspFee: s.pspFee,
+    margin: s.marginFee,
+    model: s.model,
+    blended: s.blendedPct,
   };
 }
