@@ -1,0 +1,48 @@
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { AppProviders } from './components/AppProviders';
+import { AuthGuard } from './components/AuthGuard';
+import Layout from './components/Layout';
+import ToastContainer from './components/Toast';
+import LoginPage from './pages/Login';
+import PaymentsPage from './pages/Payments';
+import LinksPage from './pages/Links';
+import AnalyticsPage from './pages/Analytics';
+import GoalsPage from './pages/Goals';
+import ComparePage from './pages/Compare';
+import PayoutsPage from './pages/Payouts';
+import CustomersPage from './pages/Customers';
+import PlatformPage from './pages/Platform';
+import WorkspacesPage from './pages/Workspaces';
+import TeamPage from './pages/Team';
+import CreatorsPage from './pages/Creators';
+import SettingsPage from './pages/Settings';
+
+export default function App() {
+  return (
+    <AppProviders>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route element={<AuthGuard />}>
+            <Route element={<Layout />}>
+              <Route path="/payments" element={<PaymentsPage />} />
+              <Route path="/links" element={<LinksPage />} />
+              <Route path="/analytics" element={<AnalyticsPage />} />
+              <Route path="/goals" element={<GoalsPage />} />
+              <Route path="/compare" element={<ComparePage />} />
+              <Route path="/payouts" element={<PayoutsPage />} />
+              <Route path="/customers" element={<CustomersPage />} />
+              <Route path="/platform" element={<PlatformPage />} />
+              <Route path="/workspaces" element={<WorkspacesPage />} />
+              <Route path="/team" element={<TeamPage />} />
+              <Route path="/creators" element={<CreatorsPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+            </Route>
+          </Route>
+          <Route path="*" element={<Navigate to="/payments" replace />} />
+        </Routes>
+      </BrowserRouter>
+      <ToastContainer />
+    </AppProviders>
+  );
+}
