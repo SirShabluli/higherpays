@@ -31,3 +31,7 @@ Thumbs.db
 # Coverage
 coverage/
 .git-commit-msg.tmp
+
+# SSH keys - never commit
+.ssh/
+*.pem

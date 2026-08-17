@@ -8,7 +8,11 @@ const { Pool } = require('pg');
 const config = require('../config');
 
 async function run() {
-  const pool = new Pool({ connectionString: config.databaseUrl });
+  // Migrations need DDL and must not be subject to RLS, so we prefer a
+  // dedicated MIGRATIONS_DATABASE_URL (owner/superuser). Falls back to the
+  // main DATABASE_URL for local dev where the app connects as owner anyway.
+  const migrationsUrl = process.env.MIGRATIONS_DATABASE_URL || config.databaseUrl;
+  const pool = new Pool({ connectionString: migrationsUrl });
   const dir = path.join(__dirname, '..', '..', 'migrations');
   const files = fs.readdirSync(dir).filter((f) => f.endsWith('.sql')).sort();
   const client = await pool.connect();
