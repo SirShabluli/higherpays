@@ -15,25 +15,30 @@ const MIN_FIXED_AMOUNT = 3;             // provider minimum: 3 USD/EUR
 const CHATTER_RATE_WINDOW_SECONDS = 30; // rate limit: one link per chatter per 30s
 
 // -----------------------------------------------------------------------------
-// Provider integration — QRMoney Hosted Checkout (POST /c3pl/dp/checkout).
-// Card data never passes through here; the fan pays on QRMoney's hosted page.
+// Provider integration — MantaPay hosted checkout.
+// Card data never touches our server; the fan pays on MantaPay's hosted page.
+// The amount is baked into the signed URL, so pricingMode='open' isn't supported
+// with MantaPay's hosted flow (see validation in POST /links below).
 // -----------------------------------------------------------------------------
-async function generateProviderLink({ ws, currency, amount, pricingMode, referenceId, notes }) {
-  const apiKey = provider.resolveApiKey(ws);
-  // Build this workspace's notify URL (webhook) when a public base is configured;
-  // otherwise QRMoney uses the notifyUrl from the merchant profile.
-  const notifyUrl = config.webhookPublicBase
+async function generateProviderLink({ ws, currency, amount, referenceId, description }) {
+  // Per-workspace notify URL. If unset, MantaPay falls back to the URL configured
+  // in the merchant profile at their portal.
+  const notificationUrl = config.webhookPublicBase
     ? `${config.webhookPublicBase.replace(/\/$/, '')}/webhooks/payment/${ws.webhook_endpoint_id}`
     : undefined;
-  const { checkoutUrl } = await provider.createCheckout({
-    apiKey,
-    unit: currency,
-    amount: pricingMode === 'fixed' ? amount : undefined, // omit => customer enters it
-    referenceId,
-    notifyUrl,
-    notes,
+
+  // MantaPay honours ExpiredOn (epoch seconds). Use the workspace-wide link TTL.
+  const expiresAt = new Date(Date.now() + config.linkTtlMinutes * 60_000);
+
+  const { checkoutUrl } = await provider.createCheckout(ws, {
+    amount,
+    currency,
+    reference: referenceId,
+    description,
+    notificationUrl,
+    expiresAt,
   });
-  return { providerLinkId: referenceId, url: checkoutUrl };
+  return { providerLinkId: referenceId, url: checkoutUrl, expiresAt };
 }
 
 // GET /workspaces/:workspaceId/links
@@ -78,25 +83,25 @@ router.get('/:id', requirePermission('links.view'), asyncHandler(async (req, res
 router.post('/', requirePermission('links.create'), asyncHandler(async (req, res) => {
   const { creatorId, customerId, pricingMode = 'fixed', amount, currency, description } = req.body || {};
   if (!creatorId) return badRequest(res, 'creatorId is required', ['creatorId']);
-  if (!['fixed', 'open'].includes(pricingMode)) return badRequest(res, "pricingMode must be 'fixed' or 'open'", ['pricingMode']);
+  // MantaPay's hosted checkout bakes the amount into a signed URL, so we don't
+  // support 'open' pricing today. If we ever do, it'll be via our own pre-page
+  // that captures the amount and hands it off to MantaPay.
+  if (pricingMode !== 'fixed') {
+    return badRequest(res, "pricingMode must be 'fixed' (open pricing not supported by MantaPay hosted checkout)", ['pricingMode']);
+  }
   if (!/^[A-Za-z]{3}$/.test(currency || '')) return badRequest(res, 'currency must be a 3-letter code', ['currency']);
 
-  let amt = null;
-  if (pricingMode === 'fixed') {
-    amt = Number(amount);
-    if (!(amt > 0)) return badRequest(res, 'amount is required for a fixed link', ['amount']);
-    if (amt < MIN_FIXED_AMOUNT) return badRequest(res, `minimum amount is ${MIN_FIXED_AMOUNT}`, ['amount']);
-    // workspace guardrails (set in Settings). Enforced here so the console can't be bypassed.
-    const lim = await withWorkspace(wid(req), uid(req), async (c) => (await c.query(
-      'SELECT min_link_amount, max_link_amount FROM workspaces WHERE id=$1', [wid(req)])).rows[0]);
-    if (lim && lim.min_link_amount != null && amt < Number(lim.min_link_amount)) {
-      return badRequest(res, `amount is below the workspace minimum of ${Number(lim.min_link_amount)}`, ['amount']);
-    }
-    if (lim && lim.max_link_amount != null && amt > Number(lim.max_link_amount)) {
-      return badRequest(res, `amount is above the workspace maximum of ${Number(lim.max_link_amount)}`, ['amount']);
-    }
-  } else if (amount != null) {
-    return badRequest(res, 'open links must not carry an amount', ['amount']);
+  const amt = Number(amount);
+  if (!(amt > 0)) return badRequest(res, 'amount is required for a fixed link', ['amount']);
+  if (amt < MIN_FIXED_AMOUNT) return badRequest(res, `minimum amount is ${MIN_FIXED_AMOUNT}`, ['amount']);
+  // Workspace guardrails (set in Settings). Enforced here so the console can't be bypassed.
+  const lim = await withWorkspace(wid(req), uid(req), async (c) => (await c.query(
+    'SELECT min_link_amount, max_link_amount FROM workspaces WHERE id=$1', [wid(req)])).rows[0]);
+  if (lim && lim.min_link_amount != null && amt < Number(lim.min_link_amount)) {
+    return badRequest(res, `amount is below the workspace minimum of ${Number(lim.min_link_amount)}`, ['amount']);
+  }
+  if (lim && lim.max_link_amount != null && amt > Number(lim.max_link_amount)) {
+    return badRequest(res, `amount is above the workspace maximum of ${Number(lim.max_link_amount)}`, ['amount']);
   }
 
   const cur = currency.toUpperCase();
@@ -130,20 +135,21 @@ router.post('/', requirePermission('links.create'), asyncHandler(async (req, res
       if (!cust) return { err: 'customer_not_found' };
     }
 
-    // workspace provider config (endpoint id + secret-store key name; never the key itself)
+    // Workspace provider config (endpoint id + secret-store key name; never the key itself).
     const ws = (await c.query(
       `SELECT id, webhook_endpoint_id, provider_config_ref, mid FROM workspaces WHERE id = $1`, [wid(req)])).rows[0];
 
-    // ask QRMoney for the hosted checkout URL
-    const provider = await generateProviderLink({ ws, currency: cur, amount: amt, pricingMode, referenceId, notes: description });
+    // Ask MantaPay for the hosted checkout URL.
+    const built = await generateProviderLink({ ws, currency: cur, amount: amt, referenceId, description });
 
     const link = (await c.query(
       `INSERT INTO payment_links
-         (workspace_id, creator_id, customer_id, created_by, pricing_mode, amount, currency, status, provider_link_id, reference_id, description)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'created',$8,$9,$10)
-       RETURNING id, pricing_mode, amount, currency, status, provider_link_id, reference_id, created_at`,
-      [wid(req), creatorId, customerId || null, req.membership.id, pricingMode, amt, cur, provider.providerLinkId, referenceId, description || null])).rows[0];
-    return { link, url: provider.url };
+         (workspace_id, creator_id, customer_id, created_by, pricing_mode, amount, currency, status, provider_link_id, reference_id, description, expires_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'created',$8,$9,$10,$11)
+       RETURNING id, pricing_mode, amount, currency, status, provider_link_id, reference_id, created_at, expires_at`,
+      [wid(req), creatorId, customerId || null, req.membership.id, 'fixed', amt, cur,
+       built.providerLinkId, referenceId, description || null, built.expiresAt])).rows[0];
+    return { link, url: built.url };
   });
 
   if (result.rateLimited) {
@@ -152,7 +158,7 @@ router.post('/', requirePermission('links.create'), asyncHandler(async (req, res
   }
   if (result.err) return res.status(404).json({ error: result.err });
 
-  await audit({ workspaceId: wid(req), actorUserId: uid(req), action: 'link.create', entityType: 'payment_link', entityId: result.link.id, metadata: { pricingMode, amount: amt, currency: cur } });
+  await audit({ workspaceId: wid(req), actorUserId: uid(req), action: 'link.create', entityType: 'payment_link', entityId: result.link.id, metadata: { pricingMode: 'fixed', amount: amt, currency: cur } });
   res.status(201).json({ ...result.link, url: result.url });
 }));
 
@@ -164,8 +170,7 @@ router.post('/', requirePermission('links.create'), asyncHandler(async (req, res
 router.post('/reconcile', requirePermission('commissions.manage'), asyncHandler(async (req, res) => {
   const graceMin = Number(req.body && req.body.graceMinutes) || 10;
   const ws = (await withWorkspace(wid(req), uid(req), (c) =>
-    c.query('SELECT id, mid, provider_config_ref FROM workspaces WHERE id=$1', [wid(req)]))).rows[0];
-  const apiKey = provider.resolveApiKey(ws);
+    c.query('SELECT id, mid, provider_config_ref, webhook_endpoint_id FROM workspaces WHERE id=$1', [wid(req)]))).rows[0];
   const summary = { checked: 0, updated: [], skipped: [] };
 
   await withWorkspace(wid(req), uid(req), async (c) => {
@@ -178,71 +183,58 @@ router.post('/reconcile', requirePermission('commissions.manage'), asyncHandler(
 
     for (const link of stuck) {
       summary.checked++;
-      // resolve the provider payment-request id (cached, else from a stored webhook event)
-      let prid = link.provider_request_id;
-      if (!prid && link.reference_id) {
-        const row = (await c.query(
-          `SELECT payload->>'id' AS id FROM webhook_events
-           WHERE workspace_id=$1 AND payload->>'referenceId'=$2 AND payload->>'id' IS NOT NULL
-           ORDER BY received_at DESC LIMIT 1`, [wid(req), link.reference_id])).rows[0];
-        prid = row && row.id;
-      }
-      if (!prid) {
-        // nothing to poll — expire it if it's genuinely past its expiry
+
+      // MantaPay's status endpoint is keyed by OUR reference (Order), not by
+      // a provider-side request id. If we don't have a reference, we can't poll.
+      if (!link.reference_id) {
         if (link.expires_at) {
           await c.query("UPDATE payment_links SET status='expired' WHERE id=$1 AND status IN ('created','opened')", [link.id]);
-          summary.updated.push({ linkId: link.id, to: 'expired', via: 'no_provider_id' });
-        } else summary.skipped.push({ linkId: link.id, reason: 'no_provider_id' });
+          summary.updated.push({ linkId: link.id, to: 'expired', via: 'no_reference' });
+        } else summary.skipped.push({ linkId: link.id, reason: 'no_reference' });
         continue;
       }
-      await c.query('UPDATE payment_links SET provider_request_id=$2 WHERE id=$1', [link.id, prid]);
 
-      let s;
-      try { s = await provider.getPaymentStatus(apiKey, prid); }
+      let statusResp;
+      try { statusResp = await provider.getPaymentStatus(ws, link.reference_id); }
       catch (e) { summary.skipped.push({ linkId: link.id, reason: 'status_error', detail: e.detail || e.message }); continue; }
-      const st = provider.mapPaymentStatus(s.payment_request_status_id);
 
-      if (st === 'pending') {
-        // In 'transition' mode codes 2 and 4 are ambiguous, so a genuine decline
-        // also lands here and would otherwise be polled forever. The link is
-        // already past its expiry window, so close it as EXPIRED (not 'failed' —
-        // we cannot honestly claim a decline). If it does settle later, the paid
-        // webhook still records the transaction and flips the link to paid.
-        if (provider.isAmbiguousStatus(s.payment_request_status_id) && link.expires_at) {
-          await c.query("UPDATE payment_links SET status='expired' WHERE id=$1 AND status IN ('created','opened')", [link.id]);
-          summary.updated.push({ linkId: link.id, to: 'expired', reason: 'ambiguous_status_past_expiry' });
-          continue;
-        }
-        summary.skipped.push({ linkId: link.id, reason: 'still_pending' }); continue;
+      // Cache the provider transaction id for later reference.
+      if (statusResp.transaction_id) {
+        await c.query('UPDATE payment_links SET provider_request_id=$2 WHERE id=$1', [link.id, statusResp.transaction_id]);
       }
-      if (st === 'declined' || st === 'canceled') {
+
+      // MantaPay outcome vocabulary: approved | declined | pending | abandoned | unknown.
+      const st = statusResp.status;
+
+      if (st === 'pending') { summary.skipped.push({ linkId: link.id, reason: 'still_pending' }); continue; }
+
+      if (st === 'declined' || st === 'abandoned') {
         await c.query("UPDATE payment_links SET status='failed' WHERE id=$1 AND status IN ('created','opened')", [link.id]);
         summary.updated.push({ linkId: link.id, to: 'failed', reason: st }); continue;
       }
-      if (st === 'paid') {
-        const gross = s.gross_amount != null ? Number(s.gross_amount) : Number(link.amount || 0);
-        const fee = s.fee != null ? Number(s.fee) : 0;
-        const net = s.net_amount != null ? Number(s.net_amount) : gross - fee;
-        const cur = (s.unit || link.currency || 'EUR').toString().toUpperCase();
-        const ptx = s.transaction_id || ('pr-' + prid);
+
+      if (st === 'approved') {
+        // MantaPay doesn't return a fee in the status response — the payout engine
+        // will price the sale from the rate card and get replaced later by the
+        // Search API's per-transaction reconciliation.
+        const gross = statusResp.gross_amount != null ? Number(statusResp.gross_amount) : Number(link.amount || 0);
+        const cur = (statusResp.unit || link.currency || 'EUR').toString().toUpperCase();
+        const ptx = statusResp.transaction_id || ('ref-' + link.reference_id);
         const tx = (await c.query(
           `INSERT INTO transactions
              (workspace_id, payment_link_id, creator_id, customer_id, attributed_membership_id,
               type, status, gross, fee, net, currency, provider_transaction_id, occurred_at, raw_payload)
-           VALUES ($1,$2,$3,$4,$5,'payment'::txn_type,'approved'::txn_status,$6,$7,$8,$9,$10,now(),$11)
+           VALUES ($1,$2,$3,$4,$5,'payment'::txn_type,'approved'::txn_status,$6,NULL,NULL,$7,$8,now(),$9)
            ON CONFLICT (workspace_id, provider_transaction_id)
-             DO UPDATE SET status=EXCLUDED.status, fee=EXCLUDED.fee, net=EXCLUDED.net
+             DO UPDATE SET status=EXCLUDED.status
            RETURNING id`,
-          [wid(req), link.id, link.creator_id, link.customer_id, link.created_by, gross, fee, net, cur, ptx, s])).rows[0];
+          [wid(req), link.id, link.creator_id, link.customer_id, link.created_by, gross, cur, ptx, statusResp])).rows[0];
         const hasSale = (await c.query("SELECT 1 FROM commission_entries WHERE transaction_id=$1 AND entry_type='sale'", [tx.id])).rows[0];
         if (!hasSale) await c.query('SELECT fn_post_sale($1)', [tx.id]);
         await c.query("UPDATE payment_links SET status='paid', paid_at=now() WHERE id=$1", [link.id]);
         summary.updated.push({ linkId: link.id, to: 'paid', amount: gross }); continue;
       }
-      if (st === 'refund' || st === 'chargeback') {
-        await c.query("UPDATE payment_links SET status='refunded' WHERE id=$1", [link.id]);
-        summary.updated.push({ linkId: link.id, to: 'refunded', reason: st }); continue;
-      }
+
       summary.skipped.push({ linkId: link.id, reason: 'status_' + st });
     }
   });

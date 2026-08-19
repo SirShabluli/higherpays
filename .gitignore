@@ -35,3 +35,6 @@ coverage/
 # SSH keys - never commit
 .ssh/
 *.pem
+
+# Local docker overrides (dev-only; EC2 pulls only docker-compose.yml)
+docker-compose.override.yml
