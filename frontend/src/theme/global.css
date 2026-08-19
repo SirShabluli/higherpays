@@ -293,7 +293,8 @@ tbody tr.txrow:hover { background: var(--surface-2); }
 .ref { font-size: 13px; color: var(--ink-2); }
 .cname { font-weight: 600; }
 .cemail { font-size: 12.5px; color: var(--muted); font-family: var(--mono); }
-.amt { font-weight: 600; font-size: 14px; }
+.amt { font-weight: 500; font-size: 14px; }
+.amt.strong { font-weight: 700; font-size: 15px; }
 .amt.up { color: var(--pos); }
 .amt.down { color: var(--neg); }
 .fee { color: var(--muted); font-size: 13px; }

@@ -84,8 +84,9 @@ export default function PaymentsPage() {
   return (
     <div>
       <PageHeader
+        eyebrow="Money in"
         title="Payments"
-        subtitle="Every transaction that hit your account, with fees and payout splits."
+        subtitle="Everything that hit your account, with fees and who's owed."
         actions={
           can('payments.export') ? (
             <button className="btn ghost" onClick={() => toast('Export coming soon.')}>Export</button>
@@ -94,9 +95,9 @@ export default function PaymentsPage() {
       />
 
       <StatGrid>
-        <StatCard label="Gross volume" value={<Money amount={gross} />} sub="What customers paid" up />
-        <StatCard label="Platform fee" value={<Money amount={fee} />} sub={`Platform fee ${rc.blended.toFixed(1)}%`} />
-        <StatCard label="Net" value={<Money amount={gross - fee} />} sub="After platform fees" up />
+        <StatCard label="Gross" value={<Money amount={gross} direction="in" />} sub="What customers paid" />
+        <StatCard label="Platform fee" value={<Money amount={fee} direction="out" />} sub={`${rc.blended.toFixed(1)}% blended`} />
+        <StatCard label="Net to you" value={<Money amount={gross - fee} direction="in" emphasis />} sub="After platform fees" />
         <StatCard
           label="Approval rate"
           value={`${filtered.length ? Math.round((paid.length / filtered.length) * 100) : 0}%`}
@@ -105,15 +106,13 @@ export default function PaymentsPage() {
         {can('commissions.view') && (
           <>
             <StatCard
-              label="Creator due payments"
+              label="Owed to creators"
               value={<Money amount={dueCreators} />}
-              color="var(--mint)"
               sub={`${new Set(paid.map((t) => t.creator).filter(Boolean)).size} in view`}
             />
             <StatCard
-              label="Team's due payments"
+              label="Owed to team"
               value={<Money amount={dueTeam} />}
-              color="var(--brand)"
               sub={`${new Set(paid.map((t) => t.chatter).filter(Boolean)).size} chatters`}
             />
           </>
@@ -156,28 +155,27 @@ export default function PaymentsPage() {
           const pf = platFee(detail.amount);
           return (
             <>
-              <h3>Transaction detail</h3>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '2px 0 12px' }}>
-                <span style={{ fontFamily: 'var(--mono)', fontSize: '14.3px', color: 'var(--brand)' }}>{detail.referenceId}</span>
+              <h3>Transaction</h3>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '2px 0 16px' }}>
+                <span className="ref mono">{detail.referenceId}</span>
                 <Pill tone={detail.paid ? 'ok' : 'no'}>{detail.paid ? 'Paid' : 'Declined'}</Pill>
               </div>
               <DetailRow label="Customer">{detail.clientName || '—'}</DetailRow>
               <DetailRow label="Creator">{detail.creator || '—'}</DetailRow>
               <DetailRow label="Chatter">{detail.chatter || '—'}</DetailRow>
-              <DetailRow label="Gross"><Money amount={detail.amount} /></DetailRow>
-              <DetailRow label={`Platform fee (${rc.blended.toFixed(1)}%)`}><Money amount={pf} /></DetailRow>
-              <DetailRow label="Net"><Money amount={detail.amount - pf} emphasis /></DetailRow>
+              <DetailRow label="Gross"><Money amount={detail.amount} direction="in" /></DetailRow>
+              <DetailRow label={`Platform fee (${rc.blended.toFixed(1)}%)`}><Money amount={pf} direction="out" /></DetailRow>
+              <DetailRow label="Net"><Money amount={detail.amount - pf} direction="in" emphasis /></DetailRow>
               <DetailRow label="Date">{new Date(detail.ts).toLocaleString()}</DetailRow>
               {detail.refunded && (
-                <div className="warnbar" style={{ marginTop: 10 }}>
+                <div className="warnbar" style={{ marginTop: 12 }}>
                   Refunded — the sale has been reversed in the ledger.
                 </div>
               )}
               <div className="modal-actions">
                 {detail.paid && !detail.refunded && can('commissions.manage') && (
                   <button
-                    className="btn ghost"
-                    style={{ color: 'var(--red)', borderColor: 'rgba(233,90,90,.4)' }}
+                    className="btn danger"
                     onClick={() => { setRefunding(detail); setRefundConfirmed(false); }}
                   >
                     Refund
@@ -202,32 +200,31 @@ export default function PaymentsPage() {
             <>
               <h3>Record a refund</h3>
               <p className="sub">
-                Issue the refund in the provider's dashboard first. This reverses the sale in your ledger so payouts stay correct.
+                Issue the refund in MantaPay first. This reverses the sale in your ledger so payouts stay correct.
               </p>
-              <div style={{ background: 'var(--panel-2)', border: '1px solid var(--line)', borderRadius: 12, padding: '12px 13px', marginBottom: 14 }}>
-                <DetailRow label="Refund to customer"><Money amount={refunding.amount} /></DetailRow>
-                <DetailRow label="Refund fee"><span style={{ color: 'var(--red)' }}><Money amount={rc.refundFee} /></span></DetailRow>
-                <DetailRow label="Chatter commission reversed"><Money amount={-split.chatterCut} /></DetailRow>
-                <div className="sub" style={{ marginTop: 8 }}>
+              <div style={{ background: 'var(--surface-2)', border: '1px solid var(--rule)', borderRadius: 'var(--radius)', padding: '14px 16px', marginBottom: 16 }}>
+                <DetailRow label="Refund to customer"><Money amount={refunding.amount} direction="out" /></DetailRow>
+                <DetailRow label="Refund fee"><Money amount={rc.refundFee} direction="out" /></DetailRow>
+                <DetailRow label="Chatter commission reversed"><Money amount={-split.chatterCut} direction="out" /></DetailRow>
+                <div className="sub" style={{ marginTop: 10 }}>
                   Platform fees already paid ({formatMoney(b.total)}) are not returned by the provider.
                 </div>
               </div>
-              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, fontSize: '13.6px', marginBottom: 12 }}>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: 13.5, marginBottom: 14 }}>
                 <input
                   type="checkbox"
                   checked={refundConfirmed}
                   onChange={(e) => setRefundConfirmed(e.target.checked)}
                   style={{ minWidth: 'auto', width: 'auto', marginTop: 3 }}
                 />
-                <span>I have issued this refund in the provider's dashboard.</span>
+                <span>I have issued this refund in MantaPay.</span>
               </label>
               <div className="modal-actions">
                 <button className="btn ghost" onClick={() => { setRefunding(null); setRefundConfirmed(false); }}>Cancel</button>
                 <button
-                  className="btn"
-                  style={{ background: 'var(--red)', borderColor: 'var(--red)' }}
+                  className="btn danger"
                   onClick={() => {
-                    if (!refundConfirmed) { toast('Confirm you issued the refund at the provider first.'); return; }
+                    if (!refundConfirmed) { toast('Confirm you issued the refund at MantaPay first.'); return; }
                     recordRefund(refunding);
                   }}
                 >

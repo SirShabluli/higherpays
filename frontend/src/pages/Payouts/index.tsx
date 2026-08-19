@@ -148,8 +148,9 @@ export default function PayoutsPage() {
   return (
     <div>
       <PageHeader
+        eyebrow="Money out"
         title="Payouts"
-        subtitle="Accrued balances and estimated payout dates for your team."
+        subtitle="What you owe your creators and team, and when it goes out."
         actions={
           <>
             <div className="field" style={{ minWidth: 0 }}>
@@ -161,7 +162,7 @@ export default function PayoutsPage() {
               </select>
             </div>
             <div className="field" style={{ minWidth: 0 }}>
-              <label>Payout cycle</label>
+              <label>Cycle</label>
               <select value={cycle} onChange={(e) => setCycle(e.target.value as typeof cycle)}>
                 <option value="weekly">Weekly (Fri)</option>
                 <option value="biweekly">Bi-weekly</option>
@@ -173,14 +174,13 @@ export default function PayoutsPage() {
       />
 
       <StatGrid>
-        <StatCard label="Creators owed" value={<Money amount={creatorsOwed} />} color="var(--mint)" sub="rev-share this period" />
-        <StatCard label="Chatters owed" value={<Money amount={chattersOwed} />} color="var(--brand)" sub="commission this period" />
+        <StatCard label="Owed to creators" value={<Money amount={creatorsOwed} direction="out" emphasis />} sub="rev-share this period" />
+        <StatCard label="Owed to team" value={<Money amount={chattersOwed} direction="out" emphasis />} sub="commissions this period" />
         <StatCard
           label="Held in reserve"
           value={<Money amount={data.reserve.held} />}
-          color="var(--amber)"
           sub={data.reserve.pct
-            ? `${data.reserve.pct}% · released after ${data.reserve.releaseDays}d · ${data.reserve.source}`
+            ? `${data.reserve.pct}% · released after ${data.reserve.releaseDays}d`
             : 'no reserve configured'}
         />
         <StatCard label="Next payout" value={ndLabel} sub={`${cycle} cycle`} />
@@ -190,21 +190,21 @@ export default function PayoutsPage() {
         <div className="card" style={{ marginBottom: 16 }}>
           <div className="sechead" style={{ marginTop: 0 }}>Cash position</div>
           <p className="sub" style={{ marginTop: 0 }}>
-            The reserve is <b>your money</b>, held by the provider and released later. If you pay everyone their full share today, you front that amount yourself.
+            The reserve is <b>your money</b>, held by MantaPay and released later. If you pay everyone in full today, you front the reserve amount yourself.
           </p>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 0' }}>
-            <span style={{ minWidth: 240, fontSize: '13.6px', color: 'var(--muted)' }}>Owed to creators &amp; chatters</span>
-            <span style={{ flex: 1, height: 8, background: 'var(--ink)', borderRadius: 4, overflow: 'hidden' }}>
-              <span style={{ display: 'block', width: `${Math.min(100, (owedNow / Math.max(owedNow, data.reserve.held, 1)) * 100)}%`, height: '100%', background: 'var(--brand)', borderRadius: 4 }} />
+            <span style={{ minWidth: 240, fontSize: 13.5, color: 'var(--muted)' }}>Owed to creators &amp; team</span>
+            <span style={{ flex: 1, height: 6, background: 'var(--surface-2)', borderRadius: 3, overflow: 'hidden' }}>
+              <span style={{ display: 'block', width: `${Math.min(100, (owedNow / Math.max(owedNow, data.reserve.held, 1)) * 100)}%`, height: '100%', background: 'var(--ink)', borderRadius: 3 }} />
             </span>
-            <span style={{ minWidth: 100, textAlign: 'right', fontSize: '13.6px' }}>{formatMoney(owedNow)}</span>
+            <span className="mono" style={{ minWidth: 100, textAlign: 'right', fontSize: 13.5 }}>{formatMoney(owedNow)}</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 0' }}>
-            <span style={{ minWidth: 240, fontSize: '13.6px', color: 'var(--muted)' }}>Held in reserve (not yet available)</span>
-            <span style={{ flex: 1, height: 8, background: 'var(--ink)', borderRadius: 4, overflow: 'hidden' }}>
-              <span style={{ display: 'block', width: `${Math.min(100, (data.reserve.held / Math.max(owedNow, data.reserve.held, 1)) * 100)}%`, height: '100%', background: 'var(--amber)', borderRadius: 4 }} />
+            <span style={{ minWidth: 240, fontSize: 13.5, color: 'var(--muted)' }}>Held in reserve (not yet available)</span>
+            <span style={{ flex: 1, height: 6, background: 'var(--surface-2)', borderRadius: 3, overflow: 'hidden' }}>
+              <span style={{ display: 'block', width: `${Math.min(100, (data.reserve.held / Math.max(owedNow, data.reserve.held, 1)) * 100)}%`, height: '100%', background: 'var(--accent)', borderRadius: 3 }} />
             </span>
-            <span style={{ minWidth: 100, textAlign: 'right', fontSize: '13.6px' }}>{formatMoney(data.reserve.held)}</span>
+            <span className="mono" style={{ minWidth: 100, textAlign: 'right', fontSize: 13.5 }}>{formatMoney(data.reserve.held)}</span>
           </div>
           {data.reserve.source === 'estimated' && (
             <div className="warnbar" style={{ marginTop: 10 }}>
@@ -238,9 +238,9 @@ export default function PayoutsPage() {
                   <tr key={c.name}>
                     <td className="cname">{c.name}</td>
                     <td><Pill>{c.model}</Pill></td>
-                    <td className="amt"><Money amount={c.revenue} /></td>
-                    <td className="amt" style={{ color: 'var(--mint)' }}>
-                      <Money amount={owed} />{c.model === 'salary' ? '/mo' : ''}
+                    <td><Money amount={c.revenue} direction="in" /></td>
+                    <td>
+                      <Money amount={owed} direction="out" emphasis />{c.model === 'salary' ? '/mo' : ''}
                     </td>
                     <td className="time">{ndLabel}</td>
                     <td>
@@ -297,7 +297,7 @@ export default function PayoutsPage() {
                 <tr key={c.name}>
                   <td className="cname">{c.name}</td>
                   <td>{c.sales}</td>
-                  <td className="amt" style={{ color: 'var(--brand)' }}><Money amount={c.owed} /></td>
+                  <td><Money amount={c.owed} direction="out" emphasis /></td>
                   <td className="time">{ndLabel}</td>
                   <td>
                     {c.owed > 0 ? (
@@ -347,10 +347,10 @@ export default function PayoutsPage() {
                 {settlements.map((s, i) => (
                   <tr key={i}>
                     <td className="cname">{s.period}</td>
-                    <td className="amt"><Money amount={s.volume} /></td>
-                    <td className="amt"><Money amount={s.fees} /></td>
-                    <td className="amt" style={{ color: 'var(--amber)' }}><Money amount={s.reserve} /></td>
-                    <td className="amt" style={{ color: 'var(--mint)' }}><Money amount={s.payable} /></td>
+                    <td><Money amount={s.volume} direction="in" /></td>
+                    <td><Money amount={s.fees} direction="out" /></td>
+                    <td><Money amount={s.reserve} /></td>
+                    <td><Money amount={s.payable} direction="in" emphasis /></td>
                     <td>
                       <Pill tone={s.reconciliation.status === 'matched' ? 'ok' : 'no'}>
                         {s.reconciliation.status === 'matched' ? 'Matched' : 'Variance'}
