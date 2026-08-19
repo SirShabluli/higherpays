@@ -2,10 +2,12 @@
 const express = require('express');
 const { withWorkspace } = require('../db');
 const { requirePermission } = require('../middleware');
-const { asyncHandler, audit } = require('../util/audit');
+const { asyncHandler } = require('../lib/http');
+const { audit } = require('../util/audit');
 const { badRequest } = require('../util/validate');
 const config = require('../config');
 const provider = require('../providers/mantapay');
+const paymentsService = require('../services/payments.service');
 
 const router = express.Router({ mergeParams: true });
 const wid = (req) => req.membership.workspaceId;
@@ -169,13 +171,15 @@ router.post('/', requirePermission('links.create'), asyncHandler(async (req, res
 // and never overrides a link the webhook already resolved).
 router.post('/reconcile', requirePermission('commissions.manage'), asyncHandler(async (req, res) => {
   const graceMin = Number(req.body && req.body.graceMinutes) || 10;
-  const ws = (await withWorkspace(wid(req), uid(req), (c) =>
-    c.query('SELECT id, mid, provider_config_ref, webhook_endpoint_id FROM workspaces WHERE id=$1', [wid(req)]))).rows[0];
   const summary = { checked: 0, updated: [], skipped: [] };
+
+  const ws = (await withWorkspace(wid(req), uid(req), (c) => c.query(
+    'SELECT id, mid, provider_config_ref, webhook_endpoint_id FROM workspaces WHERE id=$1',
+    [wid(req)]))).rows[0];
 
   await withWorkspace(wid(req), uid(req), async (c) => {
     const stuck = (await c.query(
-      `SELECT id, reference_id, provider_request_id, amount, currency, creator_id, customer_id, created_by, expires_at
+      `SELECT id, reference_id, amount, currency, expires_at
        FROM payment_links
        WHERE status IN ('created','opened')
          AND (expires_at < now() OR (expires_at IS NULL AND created_at < now() - ($1 || ' minutes')::interval))`,
@@ -184,8 +188,9 @@ router.post('/reconcile', requirePermission('commissions.manage'), asyncHandler(
     for (const link of stuck) {
       summary.checked++;
 
-      // MantaPay's status endpoint is keyed by OUR reference (Order), not by
-      // a provider-side request id. If we don't have a reference, we can't poll.
+      // MantaPay's status endpoint is keyed by OUR reference (Order). No
+      // reference => nothing to poll; expire the link if it's genuinely past
+      // its deadline.
       if (!link.reference_id) {
         if (link.expires_at) {
           await c.query("UPDATE payment_links SET status='expired' WHERE id=$1 AND status IN ('created','opened')", [link.id]);
@@ -198,43 +203,45 @@ router.post('/reconcile', requirePermission('commissions.manage'), asyncHandler(
       try { statusResp = await provider.getPaymentStatus(ws, link.reference_id); }
       catch (e) { summary.skipped.push({ linkId: link.id, reason: 'status_error', detail: e.detail || e.message }); continue; }
 
-      // Cache the provider transaction id for later reference.
       if (statusResp.transaction_id) {
-        await c.query('UPDATE payment_links SET provider_request_id=$2 WHERE id=$1', [link.id, statusResp.transaction_id]);
+        await c.query('UPDATE payment_links SET provider_request_id=$2 WHERE id=$1',
+          [link.id, statusResp.transaction_id]);
       }
 
-      // MantaPay outcome vocabulary: approved | declined | pending | abandoned | unknown.
-      const st = statusResp.status;
+      const st = statusResp.status;   // approved | declined | pending | abandoned | unknown
 
-      if (st === 'pending') { summary.skipped.push({ linkId: link.id, reason: 'still_pending' }); continue; }
-
-      if (st === 'declined' || st === 'abandoned') {
-        await c.query("UPDATE payment_links SET status='failed' WHERE id=$1 AND status IN ('created','opened')", [link.id]);
-        summary.updated.push({ linkId: link.id, to: 'failed', reason: st }); continue;
+      if (st === 'pending') {
+        summary.skipped.push({ linkId: link.id, reason: 'still_pending' });
+        continue;
       }
-
-      if (st === 'approved') {
-        // MantaPay doesn't return a fee in the status response — the payout engine
-        // will price the sale from the rate card and get replaced later by the
-        // Search API's per-transaction reconciliation.
-        const gross = statusResp.gross_amount != null ? Number(statusResp.gross_amount) : Number(link.amount || 0);
-        const cur = (statusResp.unit || link.currency || 'EUR').toString().toUpperCase();
-        const ptx = statusResp.transaction_id || ('ref-' + link.reference_id);
-        const tx = (await c.query(
-          `INSERT INTO transactions
-             (workspace_id, payment_link_id, creator_id, customer_id, attributed_membership_id,
-              type, status, gross, fee, net, currency, provider_transaction_id, occurred_at, raw_payload)
-           VALUES ($1,$2,$3,$4,$5,'payment'::txn_type,'approved'::txn_status,$6,NULL,NULL,$7,$8,now(),$9)
-           ON CONFLICT (workspace_id, provider_transaction_id)
-             DO UPDATE SET status=EXCLUDED.status
-           RETURNING id`,
-          [wid(req), link.id, link.creator_id, link.customer_id, link.created_by, gross, cur, ptx, statusResp])).rows[0];
-        const hasSale = (await c.query("SELECT 1 FROM commission_entries WHERE transaction_id=$1 AND entry_type='sale'", [tx.id])).rows[0];
-        if (!hasSale) await c.query('SELECT fn_post_sale($1)', [tx.id]);
-        await c.query("UPDATE payment_links SET status='paid', paid_at=now() WHERE id=$1", [link.id]);
-        summary.updated.push({ linkId: link.id, to: 'paid', amount: gross }); continue;
+      if (st === 'approved' || st === 'declined') {
+        // Delegate to the same service the webhook uses — same idempotency,
+        // same notification behaviour.
+        const outcome = await paymentsService.recordPaymentOutcome(c, wid(req), {
+          providerTransactionId: statusResp.transaction_id || ('ref-' + link.reference_id),
+          status: st,
+          gross: statusResp.gross_amount != null ? Number(statusResp.gross_amount) : Number(link.amount || 0),
+          fee: null,
+          net: null,
+          currency: (statusResp.unit || link.currency || 'EUR').toString().toUpperCase(),
+          linkReference: link.reference_id,
+          rawPayload: statusResp,
+        });
+        summary.updated.push({
+          linkId: link.id,
+          to: st === 'approved' ? 'paid' : 'failed',
+          transactionId: outcome.transactionId,
+          newSale: outcome.newSale,
+        });
+        continue;
       }
-
+      // st === 'abandoned' | 'unknown'
+      if (st === 'abandoned') {
+        await c.query("UPDATE payment_links SET status='failed' WHERE id=$1 AND status IN ('created','opened')",
+          [link.id]);
+        summary.updated.push({ linkId: link.id, to: 'failed', reason: 'abandoned' });
+        continue;
+      }
       summary.skipped.push({ linkId: link.id, reason: 'status_' + st });
     }
   });

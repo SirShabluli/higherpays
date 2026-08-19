@@ -1,8 +1,8 @@
 'use strict';
 const { query } = require('../db');
-
-// Wrap async route handlers so thrown errors reach the error middleware.
-const asyncHandler = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+// Re-export from lib/http for backwards compatibility with existing route
+// files that do `require('../util/audit').asyncHandler`.
+const { asyncHandler } = require('../lib/http');
 
 // Append an entry to the audit log. Best-effort: never block the request path
 // on an audit write failure, but do log it.
