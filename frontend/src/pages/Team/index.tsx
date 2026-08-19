@@ -3,6 +3,8 @@ import { useAppStore } from '../../store/appStore';
 import { useCan } from '../../hooks/usePermission';
 import Modal from '../../components/Modal';
 import { toast } from '../../components/Toast';
+import { PageHeader } from '../../components/ui';
+import { useTeamData } from './useTeamData';
 
 const initials = (n: string) =>
   n.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
@@ -10,7 +12,7 @@ const initials = (n: string) =>
 export default function TeamPage() {
   const can = useCan();
   const members = useAppStore(s => s.members);
-  const chatters = useAppStore(s => s.chatters);
+  const { chatters, isLoading, isError, setCommission } = useTeamData();
   const creators = useAppStore(s => s.creators);
   const commission = useAppStore(s => s.commission);
   const mode = useAppStore(s => s.mode);
@@ -50,15 +52,16 @@ export default function TeamPage() {
   const getCommPct = (ch: typeof chatters[0]) =>
     commEdits[ch.id] ?? ch.commissionPct ?? commission.chatterPct;
 
-  const saveCommission = () => {
-    const updated = chatters.map(ch => {
-      const v = commEdits[ch.id];
-      if (v != null) return { ...ch, commissionPct: Math.min(100, Math.max(0, v)) };
-      return ch;
-    });
-    updateState({ chatters: updated });
-    setCommEdits({});
-    toast('Chatter commission saved.');
+  const saveCommission = async () => {
+    const dirty = Object.entries(commEdits);
+    if (dirty.length === 0) return;
+    try {
+      await Promise.all(dirty.map(([id, pct]) => setCommission(id, pct)));
+      setCommEdits({});
+      toast('Chatter commission saved.');
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Could not save commission.');
+    }
   };
 
   // --- Add chatter ---
@@ -97,21 +100,19 @@ export default function TeamPage() {
 
   return (
     <div>
-      <div className="pagehead">
-        <div><h2>Team</h2><p>Everyone in this workspace.</p></div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          {canManage && (
-            <button className="btn ghost" onClick={() => setChatterModal(true)}>
-              + Add chatter
-            </button>
-          )}
-          {canManage && (
-            <button className="btn" onClick={() => setInviteModal(true)}>
-              Invite member
-            </button>
-          )}
-        </div>
-      </div>
+      <PageHeader
+        eyebrow="People"
+        title="Team"
+        subtitle="Everyone with a seat in this workspace."
+        actions={
+          canManage ? (
+            <>
+              <button className="btn ghost" onClick={() => setChatterModal(true)}>Add chatter</button>
+              <button className="btn" onClick={() => setInviteModal(true)}>Invite member</button>
+            </>
+          ) : null
+        }
+      />
 
       {/* Team table */}
       <div className="card">
@@ -121,7 +122,11 @@ export default function TeamPage() {
               <tr><th>Person</th><th>Role</th><th>Details</th></tr>
             </thead>
             <tbody>
-              {people.map((p, i) => (
+              {isLoading ? (
+                <tr><td colSpan={3} style={{ padding: 36, textAlign: 'center', color: 'var(--muted)' }}>Loading team…</td></tr>
+              ) : isError ? (
+                <tr><td colSpan={3} style={{ padding: 36, textAlign: 'center', color: 'var(--neg)' }}>Couldn't load team.</td></tr>
+              ) : people.map((p, i) => (
                 <tr key={i}>
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

@@ -3,7 +3,9 @@ import { useAppStore } from '../../store/appStore';
 import { useCan } from '../../hooks/usePermission';
 import Modal from '../../components/Modal';
 import { toast } from '../../components/Toast';
+import { PageHeader } from '../../components/ui';
 import type { Creator, RevenueModel } from '../../types';
+import { useCreatorsData } from './useCreatorsData';
 
 const initials = (n: string) =>
   n.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
@@ -17,7 +19,12 @@ const REV_LABEL: Record<string, string> = { revshare: 'Rev-Share', salary: 'Sala
 
 export default function CreatorsPage() {
   const can = useCan();
-  const creators = useAppStore(s => s.creators);
+  const {
+    creators, isLoading, isError,
+    create: createCreator,
+    updateStatus,
+    updateSplit,
+  } = useCreatorsData();
   const chatters = useAppStore(s => s.chatters);
   const links = useAppStore(s => s.links);
   const updateState = useAppStore(s => s.updateState);
@@ -42,52 +49,49 @@ export default function CreatorsPage() {
   const [cAssigned, setCAssigned] = useState<string[]>([]);
   const [cError, setCError] = useState(false);
 
-  const toggleSuspend = (cr: Creator) => {
-    const updated = creators.map(c =>
-      c.id === cr.id ? { ...c, status: (c.status === 'active' ? 'suspended' : 'active') as Creator['status'] } : c
-    );
-    updateState({ creators: updated });
-    const newStatus = cr.status === 'active' ? 'suspended' : 'active';
-    toast(`${cr.name} ${newStatus === 'active' ? 'activated' : 'suspended \u2013 no new links'}.`);
+  const toggleSuspend = async (cr: Creator) => {
+    const nextStatus: Creator['status'] = cr.status === 'active' ? 'suspended' : 'active';
+    try {
+      await updateStatus(cr.id, nextStatus);
+      toast(`${cr.name} ${nextStatus === 'active' ? 'activated' : 'suspended \u2013 no new links'}.`);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Could not update creator.');
+    }
   };
 
-  const addCreator = () => {
+  const addCreator = async () => {
     if (!cName.trim()) { setCError(true); return; }
-    let h = cHandle.trim();
-    if (h && !h.startsWith('@')) h = '@' + h;
-    const colors = ['#F4707A', '#B98CFF', '#4ADE9E', '#15C3AF', '#F5C451'];
-    const c: Creator = {
-      id: 'cr' + (creators.length + 1),
-      name: cName.trim(),
-      handle: h || '@' + cName.trim().toLowerCase().replace(/\s+/g, ''),
-      color: colors[creators.length % colors.length],
-      status: cStatus === 'suspended' ? 'suspended' : 'active',
-      revModel: cModel,
-      splitCreator: cModel === 'revshare' ? Math.min(100, Math.max(0, cSplit)) : 0,
-      mrr: 0,
-    };
-    if (cModel === 'salary') {
-      c.salary = +cSalary || 0;
-      c.salaryInc = cAutoInc ? (+cInc || 0) : 0;
-    }
-    const updatedCreators = [...creators, c];
-
-    // assign chatters
-    const updatedChatters = chatters.map(ch => {
-      if (cAssigned.includes(ch.name) && !ch.assigned.includes(cName.trim())) {
-        return { ...ch, assigned: [...ch.assigned, cName.trim()] };
+    const handle = cHandle.trim() ? (cHandle.trim().startsWith('@') ? cHandle.trim() : '@' + cHandle.trim()) : undefined;
+    try {
+      await createCreator({
+        name: cName.trim(),
+        handle,
+        revModel: cModel,
+        splitCreator: cModel === 'revshare' ? Math.min(100, Math.max(0, cSplit)) : undefined,
+        salary: cModel === 'salary' ? (+cSalary || 0) : undefined,
+        salaryInc: cModel === 'salary' && cAutoInc ? (+cInc || 0) : undefined,
+        status: cStatus === 'suspended' ? 'suspended' : 'active',
+      });
+      // Assigning chatters isn't yet supported by the backend, so we mirror
+      // it into the demo store where the local UI reads assignment counts.
+      if (cAssigned.length > 0) {
+        const updatedChatters = chatters.map(ch =>
+          cAssigned.includes(ch.name) && !ch.assigned.includes(cName.trim())
+            ? { ...ch, assigned: [...ch.assigned, cName.trim()] }
+            : ch,
+        );
+        updateState({ chatters: updatedChatters });
       }
-      return ch;
-    });
-
-    updateState({ creators: updatedCreators, chatters: updatedChatters });
-    setCreatorModal(false);
-    resetForm();
-    toast(
-      cModel === 'revshare' && cEmail
-        ? `Creator added \u2013 login invite queued to ${cEmail}.`
-        : 'Creator added.'
-    );
+      setCreatorModal(false);
+      resetForm();
+      toast(
+        cModel === 'revshare' && cEmail
+          ? `Creator added \u2013 login invite queued to ${cEmail}.`
+          : 'Creator added.',
+      );
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Could not create creator.');
+    }
   };
 
   const resetForm = () => {
@@ -99,31 +103,41 @@ export default function CreatorsPage() {
   // --- Creator splits ---
   const getSplit = (cr: Creator) => splitEdits[cr.id] ?? cr.splitCreator ?? 70;
 
-  const saveSplits = () => {
-    const updated = creators.map(cr => {
-      const v = splitEdits[cr.id];
-      if (v != null && cr.revModel === 'revshare') {
-        return { ...cr, splitCreator: Math.min(100, Math.max(0, v)) };
-      }
-      return cr;
+  const saveSplits = async () => {
+    const dirty = Object.entries(splitEdits).filter(([id, v]) => {
+      const cr = creators.find(c => c.id === id);
+      return cr && cr.revModel === 'revshare' && v != null;
     });
-    updateState({ creators: updated });
-    setSplitEdits({});
-    toast('Creator splits saved.');
+    if (dirty.length === 0) return;
+    try {
+      await Promise.all(dirty.map(([id, v]) => updateSplit(id, Math.min(100, Math.max(0, v)))));
+      setSplitEdits({});
+      toast('Creator splits saved.');
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Could not save splits.');
+    }
   };
 
   return (
     <div>
-      <div className="pagehead">
-        <div><h2>Creators</h2><p>Content creators in this workspace.</p></div>
-        {canManage && (
-          <button className="btn" onClick={() => setCreatorModal(true)}>+ Add creator</button>
-        )}
-      </div>
+      <PageHeader
+        eyebrow="People"
+        title="Creators"
+        subtitle="Content creators operating under this workspace."
+        actions={canManage ? <button className="btn" onClick={() => setCreatorModal(true)}>Add creator</button> : null}
+      />
 
       {/* Creator cards */}
       <div className="ws-grid">
-        {creators.length > 0 ? creators.map(cr => {
+        {isLoading ? (
+          <div className="card" style={{ gridColumn: '1/-1', color: 'var(--muted)', textAlign: 'center', padding: 34 }}>
+            Loading creators…
+          </div>
+        ) : isError ? (
+          <div className="card" style={{ gridColumn: '1/-1', color: 'var(--neg)', textAlign: 'center', padding: 34 }}>
+            Couldn't load creators. Try again in a moment.
+          </div>
+        ) : creators.length > 0 ? creators.map(cr => {
           const chatterCount = chatters.filter(ch => ch.assigned.includes(cr.name)).length;
           const paidLinks = links.filter(l => l.creator === cr.name && l.status === 'Paid');
           const paidCustomers = new Set(paidLinks.map(l => l.customerUsername)).size;

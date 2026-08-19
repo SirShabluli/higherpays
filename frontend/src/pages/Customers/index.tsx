@@ -4,7 +4,9 @@ import { useCan } from '../../hooks/usePermission';
 import Modal from '../../components/Modal';
 import { toast } from '../../components/Toast';
 import { tzParts } from '../../business/timezone';
+import { PageHeader } from '../../components/ui';
 import type { Customer, CustomerSegment } from '../../types';
+import { useCustomersData } from './useCustomersData';
 
 const fmt = (n: number) => {
   try { return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'EUR' }).format(n); }
@@ -33,7 +35,7 @@ const SEGMENTS: CustomerSegment[] = ['New', 'Regular', 'High value', 'VIP', 'Ina
 
 export default function CustomersPage() {
   const can = useCan();
-  const customers = useAppStore(s => s.customers);
+  const { customers, isLoading, isError } = useCustomersData();
   const creators = useAppStore(s => s.creators);
   const chatters = useAppStore(s => s.chatters);
   const links = useAppStore(s => s.links);
@@ -140,17 +142,21 @@ export default function CustomersPage() {
 
   return (
     <div>
-      <div className="pagehead">
-        <div><h2>Customers</h2><p>Fan CRM &mdash; everyone who paid.</p></div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          {can('customers.export') && (
-            <button className="btn ghost" onClick={() => toast('Export coming soon.')}>Export</button>
-          )}
-          {can('customers.manage') && (
-            <button className="btn" onClick={() => setAddModal(true)}>+ Add customer</button>
-          )}
-        </div>
-      </div>
+      <PageHeader
+        eyebrow="People"
+        title="Customers"
+        subtitle="Everyone who paid, with what they spent and who they belong to."
+        actions={
+          <>
+            {can('customers.export') && (
+              <button className="btn ghost" onClick={() => toast('Export coming soon.')}>Export</button>
+            )}
+            {can('customers.manage') && (
+              <button className="btn" onClick={() => setAddModal(true)}>Add customer</button>
+            )}
+          </>
+        }
+      />
 
       {/* Filters */}
       <div className="filters">
@@ -184,14 +190,26 @@ export default function CustomersPage() {
               <tr>{visibleCols.map(c => <th key={c.k}>{c.label}</th>)}</tr>
             </thead>
             <tbody>
-              {filtered.length > 0 ? filtered.map(c => (
+              {isLoading ? (
+                <tr>
+                  <td colSpan={visibleCols.length} style={{ padding: 36, textAlign: 'center', color: 'var(--muted)' }}>
+                    Loading customers…
+                  </td>
+                </tr>
+              ) : isError ? (
+                <tr>
+                  <td colSpan={visibleCols.length} style={{ padding: 36, textAlign: 'center', color: 'var(--neg)' }}>
+                    Couldn't load customers. Try again in a moment.
+                  </td>
+                </tr>
+              ) : filtered.length > 0 ? filtered.map(c => (
                 <tr key={c.id} style={{ cursor: 'pointer' }} onClick={() => setCardId(c.id)}>
                   {visibleCols.map(col => <td key={col.k}>{cellContent(c, col.k)}</td>)}
                 </tr>
               )) : (
                 <tr>
                   <td colSpan={visibleCols.length} style={{ padding: 36, textAlign: 'center', color: 'var(--muted)' }}>
-                    No customers match.
+                    No customers match these filters.
                   </td>
                 </tr>
               )}
