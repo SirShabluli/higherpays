@@ -1,11 +1,9 @@
 'use strict';
-// Mantapay Transaction Search — reconciliation, and the thing the previous
-// provider could not do: PER-TRANSACTION FEES.
+// MantaPay Transaction Search — reconciliation with PER-TRANSACTION FEES.
 //
-// QRMoney computed fees on a daily batch, so "what did this sale cost me" had no answer.
-// MantaPay returns a TransactionFees object on every transaction, which means
-// true cost-per-sale, real margin, and reconciliation without importing a
-// spreadsheet by hand.
+// MantaPay returns a TransactionFees object on every transaction, so we can
+// price the real cost of each sale, compute true margin, and reconcile without
+// importing a settlement spreadsheet.
 //
 // THIRD host again:
 //   hosted page  https://uiservices.mantapay.biz

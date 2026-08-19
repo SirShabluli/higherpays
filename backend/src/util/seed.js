@@ -50,7 +50,7 @@ async function run() {
     console.log(`  Role:         owner + platform super_admin`);
     console.log(`  Blended fee:  ${PSP + MARGIN}%  (PSP ${PSP}% + margin ${MARGIN}%)`);
     console.log(`  Webhook URL:  {WEBHOOK_PUBLIC_BASE}/webhooks/payment/${ws.webhook_endpoint_id}`);
-    console.log('\n  Set the workspace MID and QRMONEY_API_KEY before taking real payments.\n');
+    console.log('\n  Set the workspace MID and the MantaPay hash key (env var referenced by\n  provider_config_ref) before taking real payments.\n');
   } catch (e) {
     await c.query('ROLLBACK');
     console.error('Seed failed:', e.message);

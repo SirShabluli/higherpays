@@ -1,7 +1,7 @@
 'use strict';
 const express = require('express');
 const crypto = require('crypto');
-const { pool, query, withWorkspace, withPlatformAdmin } = require('../db');
+const { withWorkspace, withPlatformAdmin } = require('../db');
 const { requireAuth, requireWorkspace, requirePermission } = require('../middleware');
 const { asyncHandler, audit } = require('../util/audit');
 const { hashPassword } = require('../auth/passwords');

@@ -1,6 +1,6 @@
 'use strict';
 const express = require('express');
-const { pool, query, withPlatformAdmin, withUser } = require('../db');
+const { query, withPlatformAdmin, withUser } = require('../db');
 const { hashPassword, verifyPassword } = require('../auth/passwords');
 const { signAccessToken, generateRefreshToken, hashRefreshToken } = require('../auth/tokens');
 const { seedRolesForWorkspace } = require('../auth/permissions');

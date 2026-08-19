@@ -229,9 +229,10 @@ router.post('/payouts/run', requirePermission('commissions.manage'), asyncHandle
 // reversal to the ledger. `external: true` records a refund already issued in the
 // provider's own dashboard. Idempotent: a second call is rejected by fn_post_refund.
 router.post('/transactions/:txId/refund', requirePermission('commissions.manage'), asyncHandler(async (req, res) => {
-  // QRMoney has no refund API (confirmed by the provider). Refunds are issued in
-  // their dashboard and recorded here. If they ship an endpoint later, setting
-  // QRMONEY_REFUND_PATH re-enables the provider call via `external: false`.
+  // MantaPay's refund API isn't implemented yet — it's a two-step request
+  // approved by their admins. Until it is, refunds are issued in their
+  // dashboard and recorded here (`external: true`). Once we build the adapter,
+  // set MANTAPAY_REFUND_ENABLED=true to re-enable provider-side refunds.
   const providerRefundAvailable = !!config.mantapayRefundEnabled;
   const external = providerRefundAvailable ? !!(req.body && req.body.external) : true;
   const result = await withWorkspace(wid(req), uid(req), async (c) => {
