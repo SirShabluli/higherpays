@@ -37,6 +37,7 @@ export default function LoginPage() {
   const setSession = useAuthStore((s) => s.setSession);
   const setActiveWorkspaceId = useSessionStore((s) => s.setActiveWorkspaceId);
   const enableDemo = useDemoModeStore((s) => s.enable);
+  const disableDemo = useDemoModeStore((s) => s.disable);
   const setAppMode = useAppStore((s) => s.setMode);
   const loadDemo = useAppStore((s) => s.loadDemoState);
 
@@ -56,6 +57,9 @@ export default function LoginPage() {
     setSession(response);
     const firstWorkspace = response.workspaces[0];
     if (firstWorkspace) setActiveWorkspaceId(firstWorkspace.id);
+    // Explicitly leave demo mode: without this, data hooks keep serving demo
+    // data even after a valid login (useCurrentSession checks demo first).
+    disableDemo();
     setAppMode('live');
     navigate(from, { replace: true });
   }

@@ -52,7 +52,7 @@ export default function PayoutsPage() {
   const [paidCreators, setPaidCreators] = useState<Set<string>>(new Set());
   const [paidChatters, setPaidChatters] = useState<Set<string>>(new Set());
 
-  const { data, isLoading } = usePayoutsData({ period, paidCreators, paidChatters });
+  const { data, isLoading, isError } = usePayoutsData({ period, paidCreators, paidChatters });
 
   const runPayout = useMutation({
     mutationFn: (input: { payeeType: 'creator' | 'chatter'; targetId?: string }) =>
@@ -72,12 +72,35 @@ export default function PayoutsPage() {
     return <div>{lockCard('No access to payouts', 'Ask an owner or admin if you need it.')}</div>;
   }
 
-  if (isLoading || !data) {
+  if (isLoading) {
     return (
       <div>
         <PageHeader title="Payouts" subtitle="Accrued balances and estimated payout dates." />
         <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--muted)' }}>
           Loading payout breakdown…
+        </div>
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div>
+        <PageHeader title="Payouts" subtitle="Accrued balances and estimated payout dates." />
+        <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--muted)' }}>
+          <p style={{ marginBottom: 8, color: 'var(--red)' }}>Couldn't load the breakdown.</p>
+          <p className="sub">Check the API URL in Settings, or try again in a moment.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!data) {
+    return (
+      <div>
+        <PageHeader title="Payouts" subtitle="Accrued balances and estimated payout dates." />
+        <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--muted)' }}>
+          Nothing owed for this period yet.
         </div>
       </div>
     );
