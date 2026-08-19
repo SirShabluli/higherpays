@@ -85,7 +85,7 @@ router.post('/payment/:endpoint', asyncHandler(async (req, res) => {
            DO UPDATE SET status = EXCLUDED.status, fee = EXCLUDED.fee, net = EXCLUDED.net
          RETURNING id`,
         [ws.id, link ? link.id : null, link ? link.creator_id : null, link ? link.customer_id : null,
-         link ? link.created_by : null, status, gross, fee, net, ev.currency, ev.providerTxnId, ev.fields])).rows[0];
+         link ? link.created_by : null, status, gross, fee, net, ev.currency, ev.transactionId, ev.fields])).rows[0];
 
       if (link) {
         const linkStatus = ev.status === 'approved' ? 'paid' : 'failed';
