@@ -1,10 +1,13 @@
 # HigherPays — Handoff
 
 You (or your Cursor agent) are picking up a project already in progress.
-Read this doc first. It captures the full mental model of the app,
-what's been built, what runs where, and exactly what to do next.
+Read this doc first. It captures the full mental model of the app, what
+runs where, what changed most recently, and exactly what to do next.
 
 If you only have five minutes, read sections **1**, **2**, and **9**.
+
+*Last updated: 2026-08-20. Latest commit at time of writing:
+`108983d chore: ignore local skill installs`.*
 
 ---
 
@@ -32,18 +35,23 @@ isolated from each other by **Postgres Row-Level Security (RLS)**. A
 There's also a **platform (super-admin) level** for the HigherPays
 operator (Eran) sitting above every workspace.
 
+The design voice is a modern **general ledger**: paper background, ink
+type, mono for every money value. Directional colour (forest green for
+money in, oxidised red for money out) is the one bold move — everything
+else stays quiet. See `frontend/src/theme/variables.css` for the tokens.
+
 ---
 
 ## 2. Stack, at a glance
 
-| Layer      | Tech                                               |
-|------------|----------------------------------------------------|
-| Frontend   | React 19 + TypeScript + Vite + Zustand + React Query + React Router v7 |
-| Backend    | Node 22 + Express 4 + `pg` (raw SQL, no ORM)       |
-| Database   | Postgres 16 with Row-Level Security                |
-| Auth       | JWT (access + refresh), TOTP-based 2FA optional    |
-| Provider   | MantaPay (hosted checkout; see `backend/src/providers/mantapay-*.js`) |
-| Deploy     | Slim Docker containers, `docker compose up -d --build` |
+| Layer      | Tech                                                                    |
+|------------|-------------------------------------------------------------------------|
+| Frontend   | React 19 + TypeScript + Vite + Zustand + React Query + React Router v7  |
+| Backend    | Node 22 + Express 4 + `pg` (raw SQL, no ORM)                            |
+| Database   | Postgres 16 with Row-Level Security                                     |
+| Auth       | JWT (access + refresh), TOTP-based 2FA optional                         |
+| Provider   | MantaPay (hosted checkout; see `backend/src/providers/mantapay-*.js`)   |
+| Deploy     | Slim Docker containers, `docker compose up -d --build`                  |
 
 **Repo layout** (monorepo):
 
@@ -51,15 +59,18 @@ operator (Eran) sitting above every workspace.
 higherpays/
 ├── frontend/         Vite + React app
 ├── backend/          Node/Express API + Postgres migrations
-├── deploy/           Ops scripts (postgres init, etc.)
+├── deploy/           Ops scripts (postgres init, nginx server block, sanity checks)
 ├── docker-compose.yml
 └── .env.example
 ```
 
 **Where it runs**:
 
-- **Production/staging**: EC2 at `54.173.144.0`, path `/home/ubuntu/higherpays`.
-  Public URL: `http://54.173.144.0:8083/`.
+- **Production**: EC2 at `54.173.144.0`, path `/home/ubuntu/higherpays`.
+  Public URL: **`https://higherpays.com`** (both apex and `www`).
+  Fronted by the EC2's system nginx which reverse-proxies to the
+  frontend container on `127.0.0.1:8083`. TLS via Let's Encrypt (valid
+  until 2026-11-17, auto-renewed by certbot's systemd timer).
 - **Local dev**: same `docker compose up -d --build` should work.
 
 ---
@@ -70,11 +81,21 @@ SSH: `ssh -i <key.pem> ubuntu@54.173.144.0`.
 
 Three containers, all built from this repo:
 
-| Container         | Image (base)          | Purpose                                   | Exposed port |
-|-------------------|-----------------------|-------------------------------------------|--------------|
-| `higherpays-pg`   | `postgres:16-alpine`  | Data. On first boot creates a restricted `hp_app` role via `deploy/postgres-init.sh`. | Not exposed |
-| `higherpays-api`  | `node:22-alpine`      | Express API on `:3000`. Runs migrations as the DB owner, then serves as `hp_app`. | Not exposed |
-| `higherpays`      | `nginx:alpine`        | Serves the built React app + proxies `/api/*` → backend. | `8083` |
+| Container         | Image (base)          | Purpose                                                                                       | Exposed port |
+|-------------------|-----------------------|-----------------------------------------------------------------------------------------------|--------------|
+| `higherpays-pg`   | `postgres:16-alpine`  | Data. On first boot creates a restricted `hp_app` role via `deploy/postgres-init.sh`.         | Not exposed  |
+| `higherpays-api`  | `node:22-alpine`      | Express API on `:3000`. Runs migrations as the DB owner, then serves as `hp_app`.             | Not exposed  |
+| `higherpays`      | `nginx:alpine`        | Serves the built React app + proxies `/api/*` → backend container.                            | `8083`       |
+
+In front of those, the **EC2's system nginx** (not a container) fronts
+every project on the box. Its config for HigherPays lives at:
+
+- `/etc/nginx/sites-available/higherpays` on the EC2
+- Committed copy at `deploy/nginx-higherpays.conf` in this repo (source of truth)
+
+If the EC2 is ever rebuilt: drop that file into `sites-available`,
+`ln -sf ... sites-enabled/`, `nginx -t && systemctl reload nginx`,
+`certbot --nginx -d higherpays.com -d www.higherpays.com`.
 
 All wired in `docker-compose.yml`. Secrets come from `.env` next to the
 compose file (never committed — see `.env.example` for the shape).
@@ -83,14 +104,14 @@ compose file (never committed — see `.env.example` for the shape).
 
 ```bash
 docker compose ps                # what's up
-docker compose logs -f api       # tail backend
-docker compose logs -f frontend  # tail nginx
-docker compose restart api       # restart backend after `git pull`
+docker compose logs -f backend   # tail API
+docker compose logs -f frontend  # tail container nginx
+docker compose restart backend   # restart API after `git pull`
 docker compose up -d --build     # rebuild + restart everything
 docker compose down              # stop all (data survives)
 ```
 
-**Deploy a change**:
+**Deploy a change** (this is the one that got missed for three days recently — do it):
 
 ```bash
 # locally
@@ -99,10 +120,13 @@ git push origin main
 cd ~/higherpays && git pull && docker compose up -d --build
 ```
 
+Then hard-refresh the browser (Ctrl+Shift+R) so it doesn't serve stale
+JS/CSS from cache.
+
 **Login credentials seeded on first boot** (change these):
 
-- URL: `http://54.173.144.0:8083/`
-- Email: `owner@higherpays.local`
+- URL: `https://higherpays.com/`
+- Email: `owner@example.com`
 - Password: `change-me-please`
 
 ---
@@ -113,8 +137,8 @@ This is the single most important thing to understand or you'll write
 insecure code. The DB has two roles:
 
 - **`postgres`** — owner, used only by the **migrations** step. Superuser,
-  so it can do DDL and (accidentally) bypass RLS. **The app never uses this
-  role.**
+  so it can do DDL and (accidentally) bypass RLS. **The app never uses
+  this role at request time.**
 - **`hp_app`** — the runtime role. `NOSUPERUSER NOBYPASSRLS`. Subject to
   every RLS policy.
 
@@ -127,10 +151,13 @@ SET LOCAL app.user_id      = '<user uuid>';
 
 `backend/src/db.js` and `backend/src/middleware/index.js` handle this
 automatically per-request. **Never** run a raw pool query without going
-through the middleware-provided client.
+through the middleware-provided client (`withWorkspace`, `withSystem`).
 
 Boot check: `backend/src/server.js` refuses to start in production if the
 runtime role can bypass RLS.
+
+For the full picture including tenant-isolation tests, see
+`BACKEND-FLOWS.md` and `backend/test/integration/tenant-isolation.test.js`.
 
 ---
 
@@ -144,18 +171,18 @@ api/
   http.ts            fetch wrapper — injects JWT, active workspace id, refresh-on-401
   types.ts           shared response types (AuthUser, AuthWorkspace, etc.)
   workspacePath.ts   builds /workspaces/:id/... URLs from the session
-business/            Pure money math (splitAmount, feeBreakdown, rateCard, revshareRules, timezone)
+business/            Pure money math (splitAmount, feeBreakdown, rateCard, timezone)
 components/
   AppProviders.tsx   ErrorBoundary + QueryClientProvider
   AuthGuard.tsx      redirects to /login if not authenticated and not in demo
-  Layout.tsx         sidebar + workspace picker + user block + logout
+  Layout.tsx         sidebar (grouped Money in / Money out / People / Insight / Admin), demo ribbon, workspace picker
   ui/                shared kit (PageHeader, StatCard, DataTable, Money, Pill, DateCell, etc.)
 demo/                Deterministic demo generators for offline demo mode
 hooks/
   useCurrentSession  who am I + which workspace + demo or live?
   useTimezone        resolves user's IANA TZ from preferences
   useRateCard        active rate card (demo → workspace, live → API /fees)
-  usePermission      RBAC — useCan()
+  usePermission      RBAC — useCan() now sources from useCurrentSession, so real role drives nav visibility
 lib/format/          money/date/text formatters
 pages/               One folder per route: index.tsx + use<Page>Data.ts + filters.ts
 rbac/                Permission → role tables
@@ -163,60 +190,74 @@ store/
   auth.ts            JWT + AuthUser + workspaces (persisted)
   session.ts         activeWorkspaceId (persisted)
   preferences.ts     tzMode + tzManual (persisted)
-  demoMode.ts        transient "user opted into demo" flag
-  appStore.ts        LEGACY monolithic demo store — being migrated away from
-theme/               global.css + variables.css
+  demoMode.ts        transient "user opted into demo" flag; disabled on successful login
+  appStore.ts        Demo-mode dataset; used only by not-yet-live pages
+theme/               global.css + variables.css (ledger design system)
 ```
 
 ### Two modes, one UI
 
-Every page must work in two modes:
+Every page works in two modes:
 
-- **Demo mode** — no backend, all data comes from `appStore` (populated by
-  `demo/generators.ts`). User opts in via "Try demo" on the login screen.
-- **Live mode** — user logged in, data comes from React Query hitting the
-  backend.
+- **Demo mode** — no backend, all data comes from `appStore` (populated
+  by `demo/generators.ts`). User opts in via "Try demo" on the login
+  screen. A persistent amber ribbon sits at the top of `main` so nothing
+  on screen can be mistaken for real money.
+- **Live mode** — user logged in, data comes from React Query hitting
+  the backend.
 
-The pattern is: each page has a `use<Page>Data` hook that checks
-`useCurrentSession().isDemo` and either reads from `appStore` or fires an
-`api/endpoints/*` call. The page component itself is mode-agnostic.
+The pattern: each page has a `use<Page>Data` hook that checks
+`useCurrentSession().isDemo` and either reads from `appStore` or fires
+an `api/endpoints/*` call. The page component itself is mode-agnostic.
 
-**Examples of the pattern already in place**: `Payments`, `Links`,
-`Payouts`. Copy those. Do NOT invent a new pattern.
+**Reference implementations**: `Payments`, `Links`, `Payouts`,
+`Creators`, `Customers`, `Team`. Copy those. Do NOT invent a new pattern.
+
+### Design system
+
+- **Palette**: `--paper` off-white, `--ink` near-black, `--pos` forest
+  (money in), `--neg` oxidised red (money out), `--accent` ochre.
+- **Type**: `Instrument Serif` for display, `Inter` for UI, `JetBrains
+  Mono` for every money value / id / date.
+- **Money component**: always route amounts through
+  `<Money amount={n} direction="in" | "out" emphasis />`. Never
+  hand-format currency in a page.
 
 ---
 
 ## 6. What's wired to the backend vs. still demo-only
 
 ### Wired (works in live mode)
-- **Auth**: login, refresh, logout, workspace listing (`Login` page + `Layout`).
-- **Payments**: transactions list, refund modal (`Payments`).
-- **Payment Links**: list, create, reconcile (`Links`).
-- **Payouts**: breakdown, run payout, mark paid (`Payouts`).
+
+- **Auth**: login, refresh, logout, workspace listing.
+- **Payments**: transactions list, refund modal.
+- **Payment Links**: list, create, reconcile.
+- **Payouts**: breakdown, run payout, mark paid.
+- **Creators**: list, create, suspend/activate, edit rev-share splits.
+- **Customers**: list (with search, sort, segment filters).
+- **Team**: chatter list, edit commission %.
 - **Rate card** (fees %): via `useRateCard`.
 
-### Scaffolded but not yet consumed by their pages
-See §9 — these hooks already exist and just need their page to be
-switched over to them:
-- `frontend/src/pages/Creators/useCreatorsData.ts`
-- `frontend/src/pages/Customers/useCustomersData.ts`
-- `frontend/src/pages/Team/useTeamData.ts`
-
 ### Still demo-only (page reads `appStore` directly)
-- `Analytics`, `Compare`, `Goals`, `Platform`, `Settings`, `Workspaces`
-- `Team` (the "invite member" side)
-- `Customers` add/edit
-- Notifications (`NotificationBell`)
-- Product tour (`ProductTour`) — kept for now but see §9 about whether we
-  actually want a tour at all
+
+- `Analytics`, `Compare`, `Goals` — no backend endpoints yet.
+- `Platform` (super-admin) — needs `platform.routes.js` wiring.
+- `Workspaces` — needs `workspacesApi` wiring.
+- `Settings` — reads/writes demo-only. Backend fee/limit endpoints
+  exist (`workspacesApi.setLinkLimits`, `getPlatformFee`) — just not
+  consumed by the page yet.
+- `NotificationBell` — demo notifications only.
+- Team "Invite member" / Customer add-modal — no backend endpoints yet.
 
 ---
 
-## 7. Payment provider — MantaPay (NOT QRMoney)
+## 7. Payment provider — MantaPay
 
 **Important context**: this project started life integrating **QRMoney**.
-It has since been migrated to **MantaPay**. **QRMoney is dead — do not
-touch it, do not reintroduce it, and clean up its remains as you go.**
+It has since been fully migrated to **MantaPay**. QRMoney is dead — do
+not touch it, do not reintroduce it. As of wave-4 all in-code QRMoney
+references are gone; `rg -i qrmoney` returns nothing but comments in
+already-applied migration files (which we leave alone).
 
 ### Live MantaPay code lives here
 
@@ -229,58 +270,53 @@ backend/src/providers/mantapay-signature.js — request/notify signature verific
 backend/src/providers/mantapay-status.js    — status polling
 ```
 
-Env vars are in `backend/.env.example` under the `MantaPay` sections.
+Payment outcome logic (idempotent insert of a transaction, link status
+update, notification fan-out) is centralised in
+`backend/src/services/payments.service.js` — called by both the webhook
+and the `/reconcile` endpoint.
 
-### Known MantaPay open questions
+Integration tests live at `backend/test/integration/webhook.test.js`,
+including good signature, bad signature, unknown endpoint, and duplicate
+event handling.
 
-See `backend/../OPEN-QUESTIONS-MANTAPAY.md` if it's still around (it may
-have been dropped during the restructure — check `git log --all -- OPEN-QUESTIONS-MANTAPAY.md`).
-The gist: refund flow is a two-step admin-approved request that isn't
-implemented yet. Until it is, `MANTAPAY_REFUND_ENABLED=false` and the
-app **records** refunds issued in MantaPay's dashboard rather than
-calling their API.
+### How the flow works (once wired — see §9)
 
-### QRMoney references still lingering — cleanup task
+1. Chatter clicks **New link** in the UI. Frontend POSTs to
+   `POST /workspaces/:id/links` with amount, creator, chatter, customer.
+2. Backend inserts a `payment_links` row, then calls
+   `provider.createCheckout` which builds a **signed MantaPay hosted
+   URL** with amount, currency, reference, `ExpiredOn`, and a
+   per-workspace `notification_url`. That URL is returned to the UI.
+3. Chatter shares the URL with the fan; fan pays on MantaPay's hosted
+   page. Card data never touches our server.
+4. MantaPay POSTs `application/x-www-form-urlencoded` to
+   `https://higherpays.com/api/webhooks/payment/<workspace-webhook-endpoint-id>`.
+5. Webhook route (`backend/src/routes/webhooks.routes.js`):
+   - resolves tenant by endpoint id (using `withSystem` because the
+     `workspaces` table is FORCE-RLS)
+   - verifies signature with the workspace's per-merchant hash key
+   - checks the `merchantID` in the payload matches the workspace's
+     stored `mid`
+   - records the event idempotently (unique on `provider_event_id`)
+   - for `approved` / `declined`, calls
+     `paymentsService.recordPaymentOutcome` which posts the transaction,
+     updates the link status, and fans out notifications
+6. UI's Payments page picks up the new row on next refetch.
 
-These are all **comments, migration audit trails, or dead env-var
-references** — not live code — but they're confusing and should be
-scrubbed. Run this to find them:
+### Refunds
 
-```bash
-rg -i qrmoney backend/
-```
-
-Currently returns matches in:
-
-| File | Occurrences | What to do |
-|------|-------------|-----------|
-| `backend/src/config.js` | 5 | Rename the section header, drop the "Set once QRMoney supplies the spec" line, delete the `webhookPublicBase` QRMoney comment, delete the "QRMoney checkout links expire" comment on `linkTtlMinutes`. |
-| `backend/src/routes/links.routes.js` | 4 | Rewrite the header comment ("Provider integration — MantaPay Hosted Checkout"), replace "QRMoney's hosted page" → "MantaPay's hosted page", replace "QRMoney uses the notifyUrl" → "MantaPay uses the notifyUrl", replace "ask QRMoney for the hosted checkout URL" → "ask MantaPay …". |
-| `backend/src/routes/payouts.routes.js` | 2 | Rewrite the refund comment block to say MantaPay's refund flow instead of QRMoney's. Remove the `QRMONEY_REFUND_PATH` env-var reference (it's dead). |
-| `backend/src/routes/webhooks.routes.js` | 2 | Rewrite the "QRMoney posts application/x-www-form-urlencoded" comment to describe MantaPay's notify webhook shape. |
-| `backend/src/providers/mantapay-search.js` | 1 | Update the header comment — remove the QRMoney historical aside or rephrase it as a note about the previous provider. |
-| `backend/src/util/seed.js` | 1 | Change `QRMONEY_API_KEY` → `MANTAPAY_HASH_KEY` in the friendly seed-complete message. |
-| `backend/migrations/001_init.sql` | 1 | The comment `-- e.g. 'qrmoney'` → `-- e.g. 'mantapay'`. **Do NOT modify already-applied migration behaviour** — this is purely a comment. |
-| `backend/migrations/010_actual_fee_reconciliation.sql` | 1 | Comment only — update or leave as historical audit trail. |
-| `backend/migrations/026_fee_model_cascade.sql` | 1 | Comment only — update or leave as historical audit trail. |
-
-**Ground rule for the migration files**: never *edit* an already-applied
-migration to change what it *does*. Only fix comments. If a schema
-change is needed, write a new migration file with the next sequential
-number.
-
-Also do a wider sweep:
-
-```bash
-rg -i 'qrmoney|QRMONEY_' .
-```
+`MANTAPAY_REFUND_ENABLED=false` today. The two-step admin-approved
+refund flow isn't implemented; the app **records** refunds issued in
+MantaPay's dashboard rather than calling their API. See the refund path
+in `backend/src/routes/payouts.routes.js`.
 
 ---
 
 ## 8. Backend surface (what's callable)
 
-Base URL from the browser: `/api/*` (proxied to backend by nginx).
+Base URL from the browser: `/api/*` (proxied to backend by the frontend container's nginx).
 Base URL from other services on the box: `http://backend:3000/*`.
+Base URL from outside the box: `https://higherpays.com/api/*`.
 
 Health: `GET /health` → `{ ok: true, env }`.
 
@@ -294,93 +330,122 @@ Routers registered in `backend/src/server.js` under `/workspaces/:workspaceId/..
 
 Also:
 
-- `/auth/*` — login/refresh/logout/register-2fa/verify-2fa
+- `/auth/*` — login/refresh/logout/register/register-2fa/verify-2fa
 - `/platform/*` — super-admin only
 - `/webhooks/*` — payment provider notifies (raw body)
 
-The typed frontend clients for these live under
-`frontend/src/api/endpoints/`. Add a new one when you touch a new domain
-rather than raw-`fetch`ing.
+The typed frontend clients live under `frontend/src/api/endpoints/`. Add
+a new one when you touch a new domain rather than raw-`fetch`ing.
+
+For the full plain-English backend flow diagrams (Mermaid), read
+`BACKEND-FLOWS.md`.
 
 ---
 
 ## 9. What to do next — prioritised
 
-### P0. Finish wiring the three business-critical pages (in progress)
+### P0. Wire real MantaPay credentials so end-to-end payments work
 
-The hooks are already written and TypeScript-clean. What's missing is
-the page swap.
+This is the pareto of the product. Everything below it depends on it.
 
-For each page, replace `useAppStore(s => s.<thing>)` reads with the
-hook's return values, and route mutations through the hook:
+The workspace on the EC2 today has `mid = 'MID-SET-ME'` and
+`provider_config_ref` is null. Its stable webhook endpoint id is:
 
-1. **`frontend/src/pages/Creators/index.tsx`** — use `useCreatorsData`:
-   - `const { creators, isLoading, create, updateStatus, updateSplit } = useCreatorsData();`
-   - `toggleSuspend(cr)` → `updateStatus(cr.id, cr.status === 'active' ? 'suspended' : 'active')`.
-   - `addCreator()` → `create({ name, handle, revModel, splitCreator, salary, salaryInc, status })`.
-   - `saveSplits()` → `for each edited row: await updateSplit(id, pct)`, then clear edits.
-   - Delete the `updateState` import if unused after the swap.
+```
+673e969fe9df4b2680585e807457fc76
+```
 
-2. **`frontend/src/pages/Customers/index.tsx`** — use `useCustomersData`:
-   - Swap `useAppStore(s => s.customers)` → `const { customers } = useCustomersData();`.
-   - The add-customer modal has no backend endpoint yet — leave it demo-only for now, or hide it in live mode.
+So the public webhook URL to give MantaPay is:
 
-3. **`frontend/src/pages/Team/index.tsx`** — use `useTeamData`:
-   - Swap `useAppStore(s => s.chatters)` → `const { chatters, setCommission } = useTeamData();`.
-   - `saveCommission()` → `for each edited row: await setCommission(id, pct)`.
-   - Leave `members` and invite/add-chatter modals demo-only for now (no
-     backend endpoints).
+```
+https://higherpays.com/api/webhooks/payment/673e969fe9df4b2680585e807457fc76
+```
 
-After each swap: `cd frontend && npm run build && npm test`, then commit.
+**What you (Eran) need to get from the customer's MantaPay portal:**
 
-### P1. Clean up QRMoney remnants
+| Value                       | Where in portal                                       |
+|-----------------------------|-------------------------------------------------------|
+| Merchant ID (numeric-ish)   | Merchant profile / account page                       |
+| Hash key (long random)      | Merchant profile → API keys / notification signature  |
+| Notification URL (paste in) | Merchant profile → paste the webhook URL above        |
 
-See §7. Purely comment/doc changes, but leaving them makes the codebase
-lie to future readers.
+**Once you have the credentials, run this on the EC2:**
 
-### P2. Wire the remaining pages
+```bash
+# 1. Add to .env alongside docker-compose.yml
+cd ~/higherpays
+cat >> .env <<'EOF'
+
+# MantaPay live credentials (issued 2026-08-XX)
+MANTAPAY_MERCHANT_ID=<paste merchant id here>
+MANTAPAY_HASH_KEY=<paste hash key here>
+WEBHOOK_PUBLIC_BASE=https://higherpays.com/api
+EOF
+
+# 2. Update the workspace's stored MID so it matches what MantaPay signs with
+docker exec -it higherpays-pg psql -U postgres -d higherpays -c \
+  "UPDATE workspaces SET mid = '<paste merchant id here>' WHERE mid = 'MID-SET-ME';"
+
+# 3. Recreate the backend container so it picks up the new env
+docker compose up -d --build backend
+docker compose logs -f backend | head -50   # confirm it booted
+```
+
+**Then smoke-test end-to-end:**
+
+1. Open `https://higherpays.com`, sign in, go to **Payment links** → **New link**.
+2. Create a €1 link for any creator/chatter/customer. Copy the URL.
+3. Open the URL in a private window — you should land on MantaPay's hosted checkout with the €1 baked in.
+4. Complete the payment (real card, €1).
+5. Back in the app, click **Payments** — the transaction should appear within seconds.
+6. Verify the webhook row landed:
+   ```bash
+   docker exec higherpays-pg psql -U postgres -d higherpays -c \
+     "SELECT event_type, signature_valid, processed, created_at FROM webhook_events ORDER BY created_at DESC LIMIT 3;"
+   ```
+   Both `signature_valid = t` and `processed = t` for the fresh row.
+
+If the webhook doesn't arrive: check `docker compose logs -f backend`
+for `bad_signature` / `merchant_mismatch` / `unknown_endpoint` errors.
+Nine out of ten times it's a mismatch between the workspace's stored
+`mid` and the MantaPay portal's actual merchant id.
+
+### P1. Wire remaining pages to the backend
 
 Rough order of business value:
 
-1. **`Settings`** — currently reads `appStore.workspaces` and calls no API.
-   Wire to `workspacesApi.getPlatformFee`, `getLinkLimits`, `setLinkLimits`,
-   `rename`. Fee editing on the platform level goes through
+1. **Settings** — reads `appStore.workspaces` and calls no API. Wire to
+   `workspacesApi.getPlatformFee`, `getLinkLimits`, `setLinkLimits`,
+   `rename`. Platform-level fee editing goes through
    `platform.routes.js`.
-2. **`Workspaces`** — for multi-workspace agencies. `workspacesApi.*` +
+2. **Workspaces** — for multi-workspace agencies. `workspacesApi.*` +
    `authApi.workspaces()`.
-3. **`Analytics`** — the backend has `analytics.routes.js`. Build an
-   `api/endpoints/analytics.ts` client + `useAnalyticsData` hook.
-4. **`Goals`** — `targets.routes.js` on the backend.
-5. **`Compare`** — pure UI on top of analytics data.
-6. **`Platform`** — super-admin views over all workspaces (`platform.routes.js`).
+3. **Analytics** — backend has `analytics.routes.js`. Build an
+   `api/endpoints/analytics.ts` client + `useAnalyticsData` hook. This
+   unlocks Goals and Compare too (both are demo-only until analytics is
+   live).
+4. **Platform** — super-admin views over all workspaces
+   (`platform.routes.js`).
 
-### P3. UI polish (Wave 4 in earlier plans)
+### P2. Real MantaPay features beyond happy-path
 
-The user's goal was **"a UI that needs no tutorial."** Currently we ship
-a `ProductTour` component from an earlier iteration. Decide with Eran:
-either polish the UX to the point the tour is unnecessary and delete
-`ProductTour`, or keep the tour but drastically simplify it. Do not do
-both.
-
-Specific ideas that came up:
-- Better empty states (there's an `EmptyState` component in `ui/`, use it).
-- The nav should hide items the current role can't access instead of
-  showing them as read-only.
-- The workspace picker should be replaced with a proper switcher (search,
-  keyboard shortcut).
-- Consolidate `Modal` vs. inline forms — pick one and stick to it.
-
-### P4. Real MantaPay integration
-
-Still open questions in the (possibly-dropped) `OPEN-QUESTIONS-MANTAPAY.md`.
-Priority is:
-1. Refund flow (currently records-only).
-2. Search API credentials rotation (they expire every 90 days per
+1. **Refund flow** (currently records-only). Two-step admin request per
+   MantaPay's flow.
+2. **Search API credentials rotation** (they expire every 90 days per
    provider policy).
-3. Notify webhook shape confirmation.
+3. **Settlement report import** — `/settlements` endpoint exists and
+   the seed data has `MANTAPAY_SEARCH_SALT` placeholders; needs the
+   real search-API credentials to reconcile per-transaction fees.
 
-Talk to Eran before touching real MantaPay credentials — the merchant
-account is live.
+### P3. Certbot email
+
+Renewals work silently today, but there's no email attached to the
+Let's Encrypt account, so if renewal ever fails no one gets notified.
+30 seconds to fix:
+
+```bash
+ssh ubuntu@54.173.144.0 "sudo certbot update_account --email <you@domain>"
+```
 
 ---
 
@@ -390,28 +455,33 @@ account is live.
 ```bash
 cd frontend
 npm run build      # tsc + Vite build; MUST pass before pushing
-npm test           # Vitest — currently ~44 tests across business/ and pages/
-npm run lint       # ESLint — some pre-existing warnings in un-migrated pages, that's OK
+npm test           # Vitest — currently 44 tests across business/ and pages/
 ```
 
 **Backend:**
 ```bash
 cd backend
-npm test           # node:test — MantaPay signature + payout engine
+npm test                  # unit tests (signature, payout engine)
+npm run test:integration  # runs against a live Postgres — needs docker compose up
 ```
 
 **End-to-end sanity** (on EC2):
 ```bash
-curl -sS http://localhost:8083/api/health
+curl -sS https://higherpays.com/api/health
 # expect: {"ok":true,"env":"production"}
 ```
 
-Login smoke test on EC2:
+Login smoke test:
 ```bash
-curl -sS -X POST http://localhost:8083/api/auth/login \
+curl -sS -X POST https://higherpays.com/api/auth/login \
   -H 'Content-Type: application/json' \
-  --data '{"email":"owner@higherpays.local","password":"change-me-please"}'
+  --data '{"email":"owner@example.com","password":"change-me-please"}'
 # expect: JSON with accessToken, refreshToken, user, workspaces
+```
+
+Multi-site sanity (verifies you haven't broken other projects on the EC2):
+```bash
+ssh ubuntu@54.173.144.0 "bash /home/ubuntu/higherpays/deploy/check-sites.sh"
 ```
 
 ---
@@ -422,45 +492,96 @@ curl -sS -X POST http://localhost:8083/api/auth/login \
    gitignored — keep them that way.
 2. **Never edit an already-applied migration.** Write a new one.
 3. **Never bypass RLS.** No raw `pool.query()` outside the request-scoped
-   client from the middleware.
+   client from the middleware (`withWorkspace`, `withSystem`).
 4. **Money math is exact NUMERIC in the DB, JS `number` in the app.** If
    you find yourself doing floating-point currency math in a new place,
    pull the logic into `frontend/src/business/` and add a unit test.
-5. **Line endings**: the repo forces LF on shell scripts, Dockerfiles, and
-   compose files via `.gitattributes`. Don't override this — CRLF breaks
-   the Alpine containers.
-6. **Commit style**: conventional-ish — `feat(scope):`, `refactor(scope):`,
-   `fix(scope):`, `chore:`, `infra:`. Small, reviewable, one concern each.
-7. **When in doubt, follow the existing pattern.** `Payments`, `Links`,
-   `Payouts` are the reference implementations for a page. Copy them,
-   don't reinvent.
+5. **Money display always goes through `<Money />`.** Never hand-format
+   currency in a page — you'll get the direction colour and the mono
+   font for free.
+6. **Line endings**: the repo forces LF on shell scripts, Dockerfiles,
+   and compose files via `.gitattributes`. Don't override this — CRLF
+   breaks the Alpine containers.
+7. **Commit style**: conventional-ish — `feat(scope):`,
+   `refactor(scope):`, `fix(scope):`, `chore:`, `infra:`, `docs(scope):`.
+   Small, reviewable, one concern each.
+8. **After pushing, deploy**. This got missed for three days recently —
+   pushing to GitHub does nothing on its own. Run
+   `git pull && docker compose up -d --build` on the EC2 (see §3).
+9. **When in doubt, follow the existing pattern.** `Payments`, `Links`,
+   `Payouts`, `Creators`, `Customers`, `Team` are the reference
+   implementations for a page. Copy them, don't reinvent.
 
 ---
 
 ## 12. Where to look when something breaks
 
-| Symptom                                          | First place to look                                     |
-|--------------------------------------------------|---------------------------------------------------------|
-| Frontend can't reach backend                     | Browser network tab → is it hitting `/api/*` at all? Check nginx logs: `docker compose logs -f frontend`. |
-| API returns `server_error`                       | `docker compose logs -f api`. Also check the DB — is it healthy? |
-| `docker compose up` fails on postgres init       | Delete the volume: `docker compose down -v` (destroys data, only OK in dev), then bring it back up. |
-| Login returns 401                                | Password may have been rotated; check `backend/src/util/seed.js` for the current default. |
-| RLS "policies not applied" warning at startup    | The `hp_app` role has `SUPERUSER` or `BYPASSRLS`. Check `deploy/postgres-init.sh` and reinit the DB. |
-| Vite dev server won't hot-reload                 | Delete `frontend/node_modules/.vite` and restart. |
-| tsc errors after pulling                         | `cd frontend && rm -rf node_modules && npm ci`. |
+| Symptom                                          | First place to look                                                                                          |
+|--------------------------------------------------|--------------------------------------------------------------------------------------------------------------|
+| Frontend can't reach backend                     | Browser network tab → is it hitting `/api/*`? Check container nginx logs: `docker compose logs -f frontend`. |
+| `https://higherpays.com` shows a different app   | System nginx routing. Check `sudo nginx -T | grep -A5 higherpays` on the EC2 and confirm the server block from `deploy/nginx-higherpays.conf` is in place. |
+| API returns `server_error`                       | `docker compose logs -f backend`. Also check the DB — is it healthy?                                         |
+| Payments come in but no webhook fires            | Check `webhook_events` table for `signature_valid=false` rows. Almost always the workspace's stored `mid` or the env `MANTAPAY_HASH_KEY` is wrong. |
+| `docker compose up` fails on postgres init       | Delete the volume: `docker compose down -v` (destroys data, dev only). Then bring it back up.                |
+| Login returns 401                                | Password may have been rotated; check `backend/src/util/seed.js` for the current default.                    |
+| RLS "policies not applied" warning at startup    | The `hp_app` role has `SUPERUSER` or `BYPASSRLS`. Check `deploy/postgres-init.sh` and reinit the DB.         |
+| Vite dev server won't hot-reload                 | Delete `frontend/node_modules/.vite` and restart.                                                            |
+| tsc errors after pulling                         | `cd frontend && rm -rf node_modules && npm ci`.                                                              |
+| Certbot renewal fails                            | `sudo certbot renew --dry-run` to reproduce. Usually port 80 got blocked or the server block was edited by hand. |
+| Nav tab visible but pages look empty in live     | The page hasn't been wired to its `use<Page>Data` hook yet. Check §6.                                        |
 
 ---
 
 ## 13. Contacts / accounts
 
 - **GitHub**: `SirShabluli/higherpays` — main branch is the only branch;
-  push directly (no PR workflow in place yet).
-- **EC2**: `ubuntu@54.173.144.0`, key in `~/.ssh/` (ask Eran).
+  push directly (no PR workflow yet).
+- **EC2**: `ubuntu@54.173.144.0`, key at `higherpays/.ssh/ec2-key.pem`
+  (gitignored — ask Eran).
 - **AWS account**: `584120132927`.
-- **MantaPay**: merchant account is live — do not test against it without
-  Eran's OK. Sandbox creds are in the (encrypted) `.env` on the box.
+- **Domain (customer-owned)**: `higherpays.com` at Namecheap.
+- **TLS**: Let's Encrypt via certbot, systemd-timer auto-renewal. Cert
+  currently expires 2026-11-17.
+- **MantaPay**: merchant account is the customer's. Sandbox availability
+  and specific portal fields — ask the customer directly.
 
 ---
 
-*Last updated as part of Wave 3 completion + EC2 dockerisation.
-See `git log --oneline` for the exact commits behind each section.*
+## 14. History — what changed in the last two sessions
+
+For the exact commit trail run `git log --oneline`. In summary:
+
+**Backend refactor (waves 0–5, commits `f177ad1`..`c9c6030`):**
+- Fixed a bug where `links.routes.js` was still calling MantaPay with
+  QRMoney-shaped arguments.
+- Full HTTP integration test suite (`auth`, `tenant-isolation`, `links`,
+  `webhook`) — 44 backend tests passing.
+- Extracted `services/payments.service.js` (idempotent transaction
+  posting + notification fan-out), used by both webhook and reconciler.
+- Custom `HttpError` hierarchy + centralised error middleware.
+- Full QRMoney purge (comments, config, seed messages).
+- `BACKEND-FLOWS.md` — Mermaid diagrams for every backend flow in
+  low-technical language.
+
+**Frontend refactor (waves FE-0…FE-4, commits `2ebe6b9`..`00c085f`):**
+- Fixed the real "navbar broken" bug: `useCan` was reading the demo
+  store's role, and `Login` never called `disableDemo()` — so live
+  sessions kept serving demo data.
+- New ledger design system (paper + ink, Instrument Serif + Inter +
+  JetBrains Mono, mono for money).
+- Sidebar re-grouped by intent (Money in / Money out / People /
+  Insight / Admin). Amber demo ribbon on top of `main` in demo mode.
+- Payments / Links / Payouts adopted `direction` prop on money values;
+  copy tightened per the frontend-design skill.
+- Creators / Customers / Team wired to their live-data hooks. Loading
+  and error rows added.
+- Deleted `ProductTour` (dead code).
+
+**Deploy (commits `97aa12e`):**
+- System nginx server block for `higherpays.com` + `www.higherpays.com`
+  reverse-proxying to `127.0.0.1:8083`. Committed at
+  `deploy/nginx-higherpays.conf` as source of truth.
+- Let's Encrypt cert via `certbot --nginx`.
+
+If you're catching up, read those commit messages in order — they're
+written to be read.
