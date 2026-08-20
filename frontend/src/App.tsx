@@ -20,7 +20,7 @@ import SettingsPage from './pages/Settings';
 export default function App() {
   return (
     <AppProviders>
-      <BrowserRouter>
+      <BrowserRouter useTransitions={false}>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route element={<AuthGuard />}>
