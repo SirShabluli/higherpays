@@ -38,3 +38,7 @@ coverage/
 
 # Local docker overrides (dev-only; EC2 pulls only docker-compose.yml)
 docker-compose.override.yml
+
+# Local skill installs — machine-local, not part of the app
+.agents/
+skills-lock.json
